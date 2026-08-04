@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { defaultDesign, winding, analyse, geometry, toPyleecan, checks } from "../src/motor.js";
+import {
+  defaultDesign, defaultSPM, winding, analyse, geometry, toPyleecan, checks,
+  analyseSCIM, checksSCIM, cageGeometry, nameplate, toPyleecanSCIM,
+} from "../src/motor.js";
 
 const near = (a, b, tol, what) =>
   assert.ok(Math.abs(a - b) < tol, `${what}: ${a} beklenen ${b} (±${tol})`);
@@ -19,7 +22,7 @@ const kwCases = [
 
 for (const c of kwCases) {
   test(`sargı faktörü — ${c.name}`, () => {
-    const d = { ...defaultDesign(), Zs: c.Zs, p: c.p, Nlayer: c.Nlayer, coil_pitch: c.coil_pitch };
+    const d = { ...defaultSPM(), Zs: c.Zs, p: c.p, Nlayer: c.Nlayer, coil_pitch: c.coil_pitch };
     const w = winding(d);
     near(w.kw1, c.kw, 0.002, "kw1");
     near(w.q, c.q, 1e-9, "q");
@@ -28,7 +31,7 @@ for (const c of kwCases) {
 }
 
 test("kısa adım sargı faktörünü düşürür", () => {
-  const base = { ...defaultDesign(), Zs: 36, p: 3, Nlayer: 2 };
+  const base = { ...defaultSPM(), Zs: 36, p: 3, Nlayer: 2 };
   const full = winding({ ...base, coil_pitch: 6 }).kw1;
   const short = winding({ ...base, coil_pitch: 5 }).kw1;
   assert.ok(short < full, `kısa adım (${short}) tam adımdan (${full}) küçük olmalı`);
@@ -36,7 +39,7 @@ test("kısa adım sargı faktörünü düşürür", () => {
 });
 
 test("faz iletken sayıları dengeli dağılır", () => {
-  const w = winding(defaultDesign());
+  const w = winding(defaultSPM());
   const totals = w.conductors.map((a) => a.reduce((s, v) => s + Math.abs(v), 0));
   assert.deepEqual(totals, [totals[0], totals[0], totals[0]], "her faz eşit iletken almalı");
   for (const a of w.conductors)
@@ -45,22 +48,22 @@ test("faz iletken sayıları dengeli dağılır", () => {
 
 test("dengesiz kombinasyon yakalanır", () => {
   // 12 oluk / 12 kutup: t = gcd(12,6) = 6, 12/(6*3) = 0.667 -> tam sayı değil
-  const w = winding({ ...defaultDesign(), Zs: 12, p: 6 });
+  const w = winding({ ...defaultSPM(), Zs: 12, p: 6 });
   assert.equal(w.balanced, false);
 });
 
 test("vuruntu periyodu ve simetri göstergeleri", () => {
-  const a = winding({ ...defaultDesign(), Zs: 12, p: 5 }); // 12/10
+  const a = winding({ ...defaultSPM(), Zs: 12, p: 5 }); // 12/10
   assert.equal(a.cogPeriod, 60, "OKEK(12,10) = 60");
   assert.equal(a.symmetric, true, "OBEB(12,10) = 2, çift");
 
-  const b = winding({ ...defaultDesign(), Zs: 9, p: 4 });  // 9/8
+  const b = winding({ ...defaultSPM(), Zs: 9, p: 4 });  // 9/8
   assert.equal(b.cogPeriod, 72, "OKEK(9,8) = 72");
   assert.equal(b.symmetric, false, "OBEB(9,8) = 1, tek -> dengesiz çekme");
 });
 
 test("geometri tutarlı", () => {
-  const d = defaultDesign();
+  const d = defaultSPM();
   const g = geometry(d);
   near(g.r3, d.Rint + d.H0 + d.H1 + d.H2, 1e-9, "oluk dibi");
   near(g.hy, d.Rext - g.r3, 1e-9, "boyunduruk");
@@ -70,12 +73,12 @@ test("geometri tutarlı", () => {
 });
 
 test("varsayılan tasarım makul mühendislik değerleri üretir", () => {
-  const r = analyse(defaultDesign());
+  const r = analyse(defaultSPM());
   assert.ok(r.kc > 1.0 && r.kc < 1.4, `Carter kc = ${r.kc}`);
   assert.ok(r.Bg > 0.5 && r.Bg < 1.1, `Bg = ${r.Bg} T`);
   assert.ok(r.Bt > 0.8 && r.Bt < 1.8, `Bt = ${r.Bt} T`);
   assert.ok(r.J < 7, `akım yoğunluğu = ${r.J} A/mm²`);
-  assert.equal(checks(defaultDesign(), r).every((c) => c.level === "ok"), true,
+  assert.equal(checks(defaultSPM(), r).every((c) => c.level === "ok"), true,
     "varsayılan tasarım tüm kontrolleri geçmeli");
   assert.ok(r.By > 0.4 && r.By < 2.0, `By = ${r.By} T`);
   assert.ok(r.fill > 0.1 && r.fill < 0.6, `doluluk = ${r.fill}`);
@@ -85,19 +88,96 @@ test("varsayılan tasarım makul mühendislik değerleri üretir", () => {
 });
 
 test("moment akımla doğrusal, akı bağıyla orantılı", () => {
-  const d = defaultDesign();
+  const d = defaultSPM();
   const a = analyse(d);
   const b = analyse({ ...d, Irms: d.Irms * 2 });
   near(b.T / a.T, 2, 1e-9, "moment akımla doğrusal");
 });
 
 test("hava aralığını büyütmek akıyı düşürür", () => {
-  const d = defaultDesign();
+  const d = defaultSPM();
   assert.ok(analyse({ ...d, gap: 2.0 }).Bg < analyse({ ...d, gap: 0.5 }).Bg);
 });
 
-test("pyleecan export şeması", () => {
+/* ================================================================== *
+ * Asenkron motor — doküman değerleriyle doğrulama
+ * ================================================================== */
+
+test("SCIM: etiket değerleri modelle örtüşür", () => {
   const d = defaultDesign();
+  assert.equal(d.type, "scim");
+  const r = analyseSCIM(d);
+  for (const c of nameplate(d, r))
+    assert.ok(Math.abs(c.dev) < 0.08,
+      `${c.n}: hesap ${c.calc.toFixed(3)} / etiket ${c.plate} → %${(c.dev * 100).toFixed(1)} sapma`);
+});
+
+test("SCIM: bağlantı üçgen olmalı — yıldız etiketle bağdaşmıyor", () => {
+  const d = defaultDesign();
+  const delta = analyseSCIM(d);
+  const wye = analyseSCIM({ ...d, connection: "wye" });
+
+  // Üçgende kalkış momenti etikete yakın, yıldızda üçte birine düşer
+  assert.ok(Math.abs(delta.Tstart - d.plate.Tstart) / d.plate.Tstart < 0.08);
+  assert.ok(wye.Tstart < 0.4 * d.plate.Tstart, `yıldız kalkış momenti ${wye.Tstart}`);
+
+  // Yıldızda devrilme momenti nominalin altına düşer -> fiziksel olarak imkânsız
+  assert.ok(wye.peakT < d.plate.T, `yıldız devrilme momenti ${wye.peakT} < nominal ${d.plate.T}`);
+  assert.ok(delta.peakT > d.plate.T * 1.5, "üçgende sağlıklı devrilme payı");
+});
+
+test("SCIM: mıknatıslanma reaktansı geometriden makul çıkar", () => {
+  const r = analyseSCIM(defaultDesign());
+  assert.ok(r.Xm > 50 && r.Xm < 100, `Xm = ${r.Xm} Ω`);
+  assert.ok(r.kc > 1.2 && r.kc < 1.6, `Carter kc = ${r.kc}`);
+});
+
+test("SCIM: moment-kayma eğrisi tutarlı", () => {
+  const d = defaultDesign();
+  const r = analyseSCIM(d);
+  assert.ok(r.peakT > r.T, "devrilme momenti nominal momentin üstünde");
+  assert.ok(r.peakS > r.s, "devrilme kayması nominal kaymanın üstünde");
+  assert.ok(r.Ilr > r.I1 * 3, "kilitli rotor akımı nominalin katı");
+  const atSync = r.curve.find((c) => c.s === 0);
+  assert.ok(!atSync || atSync.T < 0.01, "senkron hızda moment sıfıra gider");
+});
+
+test("SCIM: 48/38 oluk uyumu ve sargı", () => {
+  const d = defaultDesign();
+  const w = winding(d);
+  near(w.kw1, 0.9659, 0.002, "48 oluk 8 kutup tam adım kw1");
+  assert.equal(w.Nph, 240, "faz başına sarım");
+  assert.ok(w.balanced);
+  assert.equal(checksSCIM(d, analyseSCIM(d)).some((c) => c.label === "Oluk uyumu"), false,
+    "48/38 kombinasyonu oluk uyumu uyarısı vermemeli");
+});
+
+test("SCIM: geometri dokümanla uyumlu", () => {
+  const d = defaultDesign();
+  const g = geometry(d), c = cageGeometry(d);
+  near(d.Rext * 2, 91, 1e-9, "stator dış çapı");
+  near(d.Rint * 2, 66, 1e-9, "stator iç çapı");
+  near(c.Rr * 2, 65.4, 1e-9, "rotor dış çapı");
+  near(g.A_slot, 17.155, 0.1, "net oluk alanı");
+  assert.equal(d.Zs, 48);
+  assert.equal(d.Zr, 38);
+});
+
+test("SCIM: pyleecan export şeması", () => {
+  const j = toPyleecanSCIM(defaultDesign());
+  assert.equal(j.__class__, "MachineSCIM");
+  assert.equal(j.stator.__class__, "LamSlotWind");
+  assert.equal(j.rotor.__class__, "LamSquirrelCage");
+  assert.equal(j.rotor.slot.__class__, "SlotW21");
+  assert.equal(j.rotor.winding.conductor.__class__, "CondType21");
+  assert.equal(j.stator.winding.type_connection, 1, "üçgen bağlantı");
+  assert.equal(j.stator.winding.is_wye, false);
+  near(j.rotor.Rext, 0.0327, 1e-9, "rotor yarıçapı metre");
+  assert.equal(j.rotor.slot.Zs, 38);
+});
+
+test("pyleecan export şeması", () => {
+  const d = defaultSPM();
   const j = toPyleecan(d);
   assert.equal(j.__class__, "MachineSIPMSM");
   assert.equal(j.stator.__class__, "LamSlotWind");

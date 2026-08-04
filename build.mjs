@@ -19,14 +19,16 @@ const TITLE = "Motor Tasarım Atölyesi";
 const DESC = "Kalıcı mıknatıslı senkron motorlar için etkileşimli stator ve rotor tasarım aracı.";
 
 const css = await read("src/style.css");
-const motor = await read("src/motor.js");
-const appjs = await read("src/app.js");
 
-// Tek bir modül gövdesi hâline getir: motor.js'ten export, app.js'ten import kaldır.
-const bundle = [
-  motor.replace(/^export\s+/gm, ""),
-  appjs.replace(/^import\s+\{[\s\S]*?\}\s+from\s+["']\.\/motor\.js["'];\s*$/m, ""),
-].join("\n\n");
+// Tek bir modül gövdesi hâline getirilir: `export` sözcükleri ve yerel
+// `import` bildirimleri düşürülür, dosyalar bağımlılık sırasına dizilir.
+const stripExports = (s) => s.replace(/^export\s+/gm, "");
+const stripLocalImports = (s) =>
+  s.replace(/^import\s+(?:\{[\s\S]*?\}|[\w$]+)\s+from\s+["']\.\/[^"']+["'];?\s*$/gm, "");
+
+const bundle = (await Promise.all(
+  ["src/motor.js", "src/view3d.js", "src/app.js"].map(read)
+)).map((s) => stripLocalImports(stripExports(s))).join("\n\n");
 
 const body = `<title>${TITLE}</title>
 <meta name="description" content="${DESC}">

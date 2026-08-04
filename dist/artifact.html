@@ -28,6 +28,7 @@
   --lam-tooth: #D6E0E6;
   --rotor:     #A9B8C1;
   --shaft:     #94A5AE;
+  --cage:      #9FA8AC;
   --air:       #EDF1F3;
 
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
@@ -61,6 +62,7 @@
     --lam-tooth: #2C3E48;
     --rotor:     #374954;
     --shaft:     #3B4C56;
+    --cage:      #56646A;
     --air:       #0B1115;
     color-scheme: dark;
   }
@@ -72,7 +74,7 @@
   --ink: #DCE6EB; --ink-2: #92A5B0; --ink-3: #64757F;
   --copper: #D08B52; --steel: #6C9BBD; --verdigris: #58A188; --magnet: #9086BA;
   --ok: #59B583; --warn: #D6A93C; --crit: #E0745A;
-  --lam: #24333C; --lam-tooth: #2C3E48; --rotor: #374954; --shaft: #3B4C56;
+  --lam: #24333C; --lam-tooth: #2C3E48; --rotor: #374954; --shaft: #3B4C56; --cage: #56646A;
   --air: #0B1115;
   color-scheme: dark;
 }
@@ -83,7 +85,7 @@
   --ink: #0E171C; --ink-2: #4C5F6A; --ink-3: #7C8E99;
   --copper: #B4703C; --steel: #4A7291; --verdigris: #3F7A66; --magnet: #6C6091;
   --ok: #3E8C61; --warn: #A97D14; --crit: #B23E2A;
-  --lam: #C6D2D9; --lam-tooth: #D6E0E6; --rotor: #A9B8C1; --shaft: #94A5AE;
+  --lam: #C6D2D9; --lam-tooth: #D6E0E6; --rotor: #A9B8C1; --shaft: #94A5AE; --cage: #9FA8AC;
   --air: #EDF1F3;
   color-scheme: light;
 }
@@ -149,6 +151,50 @@ body {
 }
 .chip[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
 .chip:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--copper); outline-offset: 2px; }
+
+/* --- Makine tipi seçimi --- */
+.types { display: flex; gap: 4px; margin-left: auto; }
+
+/* --- 3B tuval ve denetimleri --- */
+#gl {
+  display: block; width: 100%; aspect-ratio: 1 / 1;
+  touch-action: none; cursor: grab;
+}
+#gl:active { cursor: grabbing; }
+#gl[hidden] { display: none; }
+
+.d3panel {
+  border: 1px solid var(--line); border-top: none;
+  background: var(--surface); padding: 8px;
+  display: grid; gap: 8px;
+}
+.d3panel[hidden] { display: none; }
+.d3row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.d3row label {
+  display: flex; align-items: center; gap: 7px; flex: 1 1 130px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.d3row input[type="range"] { flex: 1; min-width: 70px; accent-color: var(--copper); height: 20px; }
+.chips { display: flex; gap: 4px; flex-wrap: wrap; }
+
+/* --- Moment/devir grafiği --- */
+.chart { width: 100%; height: auto; display: block; }
+.chart .grid { stroke: var(--line-soft); stroke-width: 0.6; }
+.chart .tick { font-family: var(--mono); font-size: 7px; fill: var(--ink-3); }
+.chart .curve { fill: none; stroke: var(--copper); stroke-width: 1.8; stroke-linejoin: round; }
+.chart .pointlbl { font-family: var(--mono); font-size: 7px; fill: var(--ink-2); }
+.chart .pt-op { fill: var(--copper); }
+.chart .pt-peak { fill: var(--steel); }
+.chart .pt-start { fill: var(--verdigris); }
+
+/* --- Etiket sapması --- */
+.row .v b { font-weight: 700; margin-left: 6px; font-size: 11px; }
+.row .v b[data-l="ok"] { color: var(--ok); }
+.row .v b[data-l="warn"] { color: var(--warn); }
+.row .v b[data-l="crit"] { color: var(--crit); }
+
+.cage-bar { fill: var(--cage); stroke: var(--line); stroke-width: 0.2; }
 
 .fluxkey {
   position: absolute; right: 10px; bottom: 10px;
@@ -376,15 +422,91 @@ const MATERIALS = {
     alpha: 0.00393,     // 1/K
     rho: 8933,
   },
+  aluminium: {
+    name: "Aluminium",
+    rho: 2700,
+    rho_elec: 2.83e-8,
+    alpha: 0.0039,
+  },
   shaft: { name: "Steel-C45", rho: 7850, rho_elec: 1.7e-7 },
   insulation: { name: "Insulation1", rho: 1400 },
 };
 
 /* ------------------------------------------------------------------ *
- * Varsayılan tasarım — 12 oluk / 10 kutup konsantre sargılı SPM
+ * Varsayılan tasarım — 400 Hz havacılık tipi sincap kafesli asenkron motor
+ *
+ * Değerler kullanıcının elindeki motor dokümanından alınmıştır. Bağlantı
+ * biçimi dokümanda yazmıyordu; eşdeğer devre parametreleri ile etiket
+ * başarımı yalnızca ÜÇGEN bağlantıda (faz gerilimi 200 V) örtüşüyor —
+ * bkz. test/motor.test.mjs içindeki etiket doğrulaması.
  * ------------------------------------------------------------------ */
 function defaultDesign() {
   return {
+    type: "scim",
+    name: "SCIM-48s38r-400Hz",
+
+    // --- Stator laminasyonu ---
+    Rext: 45.5,    // 91 mm dış çap
+    Rint: 33.0,    // 66 mm delik çapı
+    L1: 58,        // aktif paket
+    Kf1: 0.95,
+
+    // --- Stator oluğu ---
+    Zs: 48,
+    // Oluk profili dokümandaki net oluk alanına (17,155 mm²) oturtulmuştur.
+    W0: 1.8, H0: 0.6, H1: 0.8, H2: 6.0,
+    W3: 2.0,       // diş genişliği
+    R1: 0.8,
+
+    // --- Sargı ---
+    p: 4,          // 8 kutup (400 Hz -> 6000 d/dk senkron)
+    qs: 3,
+    Ntcoil: 15,    // bobin başına sarım (çift katman -> oluk başına 30 iletken)
+    Npcp: 1,
+    Nlayer: 2,
+    coil_pitch: 6, // tam adım (48/8 = 6)
+    Wwire: 0.55,
+    Nwppc: 1,
+
+    // --- Rotor: sincap kafesi ---
+    Zr: 38,        // rotor çubuk sayısı
+    Hbar: 7.0,     // çubuk yüksekliği
+    Wbar: 2.8,     // çubuk genişliği
+    W0r: 0.8,      // rotor oluk ağzı
+    H0r: 0.5,
+    gap: 0.30,     // hava aralığı
+    Drsh: 44,      // mil / rotor iç çapı
+
+    // --- Elektriksel besleme ---
+    Vline: 200,          // hat gerilimi [V]
+    connection: "delta", // "delta" | "wye"
+    freq: 400,           // [Hz]
+
+    // --- Eşdeğer devre (doküman değerleri, faz başına) ---
+    Rs: 3.99, Xls: 5.42,
+    Rr: 3.65, Xlr: 5.26,
+    Xm: 0,     // 0 ise geometriden hesaplanır
+    Pfw: 60,   // sürtünme + rüzgâr kaybı [W]
+
+    speed: 5600,   // çalışma devri [d/dk]
+    Twind: 100,
+    Tmag: 80,
+
+    // SPM alanları (tip değiştirilirse kullanılır)
+    Hmag: 4.0, alpha_m: 0.82, Irms: 18,
+
+    // --- Etiket değerleri (karşılaştırma paneli için) ---
+    plate: {
+      Pout: 1500, speed: 5600, T: 2.6, Tstart: 4.0,
+      I: 4.4, Ilr: 15.8, eta: 0.78, pf: 0.72, nsync: 6000, Aslot: 17.155,
+    },
+  };
+}
+
+/** Kalıcı mıknatıslı örnek tasarım (12 oluk / 10 kutup). */
+function defaultSPM() {
+  return {
+    type: "spm",
     name: "SPM-12s10p",
 
     // --- Stator laminasyonu (LamSlotWind) --- [mm]
@@ -629,6 +751,230 @@ function analyse(d) {
   };
 }
 
+/* ================================================================== *
+ * SİNCAP KAFESLİ ASENKRON MAKİNE (SCIM)
+ * ================================================================== */
+
+/** Rotor kafes geometrisi. */
+function cageGeometry(d) {
+  const Rr = d.Rint - d.gap;         // rotor dış yarıçapı
+  const rb1 = Rr - d.H0r;            // çubuk üstü
+  const rb0 = rb1 - d.Hbar;          // çubuk dibi
+  const Rsh = d.Drsh / 2;
+  const hyr = rb0 - Rsh;             // rotor boyunduruğu
+  const tau_r = (TAU * Rr) / d.Zr;   // rotor oluk adımı
+  const A_bar = d.Hbar * d.Wbar;     // çubuk kesiti [mm^2]
+  // rotor dişi (çubuklar arası) ortalama genişliği
+  const W3r = (TAU * ((rb0 + rb1) / 2)) / d.Zr - d.Wbar;
+  return { Rr, rb0, rb1, Rsh, hyr, tau_r, A_bar, W3r };
+}
+
+/** Oluk ağzının etkin hava aralığını büyütmesi (Carter). */
+function carter(tau, W0, g) {
+  const u = W0 / (2 * g);
+  const gamma = (4 / Math.PI) * (u * Math.atan(u) - Math.log(Math.sqrt(1 + u * u)));
+  return tau / Math.max(1e-9, tau - gamma * g);
+}
+
+/**
+ * Mıknatıslanma reaktansı — hava aralığı geometrisinden.
+ * Lm = 6 μ0 L r (kw Nph)^2 / (π p^2 g_eff)
+ */
+function magnetizingX(d, w, kc, ksat = 1.3) {
+  const mm = 1e-3;
+  const g_eff = d.gap * mm * kc * ksat;
+  const Lm = (6 * 4e-7 * Math.PI * d.L1 * mm * d.Rint * mm * (w.kw1 * w.Nph) ** 2)
+    / (Math.PI * d.p * d.p * Math.max(1e-9, g_eff));
+  // Bozuk geometride (kw1 = 0 gibi) sıfıra düşmesini engelle: eşdeğer devre
+  // sıfır mıknatıslanma reaktansıyla çözülemez.
+  const X = TAU * d.freq * Lm;
+  return Number.isFinite(X) && X > 1e-3 ? X : 1e-3;
+}
+
+/* Karmaşık sayı yardımcıları (küçük ve yerel) */
+const C = (re, im = 0) => ({ re, im });
+const cAdd = (a, b) => C(a.re + b.re, a.im + b.im);
+const cMul = (a, b) => C(a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re);
+const cDiv = (a, b) => {
+  const q = b.re * b.re + b.im * b.im;
+  return C((a.re * b.re + a.im * b.im) / q, (a.im * b.re - a.re * b.im) / q);
+};
+const cAbs = (a) => Math.hypot(a.re, a.im);
+
+/** Faz gerilimi — üçgende hat gerilimine eşit, yıldızda √3 küçüktür. */
+const phaseVoltage = (d) =>
+  d.connection === "delta" ? d.Vline : d.Vline / Math.sqrt(3);
+
+/** Verilen kaymada eşdeğer devre çözümü. */
+function solveSlip(d, Xm, s) {
+  const V = phaseVoltage(d);
+  const ws = (TAU * d.freq) / d.p;               // senkron açısal hız [rad/s]
+  const sc = Math.abs(s) < 1e-6 ? 1e-6 : s;
+
+  const Zs_ = C(d.Rs, d.Xls);
+  const Zr_ = C(d.Rr / sc, d.Xlr);
+  const Zm_ = C(0, Xm);
+  const Zpar = cDiv(cMul(Zm_, Zr_), cAdd(Zm_, Zr_));
+  const Ztot = cAdd(Zs_, Zpar);
+
+  const I1 = V / cAbs(Ztot);
+  const pf = Ztot.re / cAbs(Ztot);
+  const I2 = I1 * cAbs(Zm_) / cAbs(cAdd(Zm_, Zr_));
+
+  const Pgap = 3 * I2 * I2 * (d.Rr / sc);
+  const T = Pgap / ws;                           // hava aralığı momenti
+  const Pmech = Pgap * (1 - s);
+  const Pcus = 3 * I1 * I1 * d.Rs;
+  const Pcur = Pgap * s;
+  const Pin = 3 * V * I1 * pf;
+
+  const num = (x) => (Number.isFinite(x) ? x : 0);
+  return {
+    V, ws, Ztot,
+    I1: num(I1), I2: num(I2), pf: num(pf), Pgap: num(Pgap), T: num(T),
+    Pmech: num(Pmech), Pcus: num(Pcus), Pcur: num(Pcur), Pin: num(Pin),
+  };
+}
+
+function analyseSCIM(d) {
+  const g = geometry(d);
+  const c = cageGeometry(d);
+  const w = winding(d);
+  const M = MATERIALS;
+  const mm = 1e-3;
+
+  // Etkin hava aralığı: stator + rotor oluk ağızları
+  const kc_s = carter(g.tau_s, d.W0, d.gap);
+  const kc_r = carter(c.tau_r, d.W0r, d.gap);
+  const kc = kc_s * kc_r;
+
+  const Xm = d.Xm > 0 ? d.Xm : magnetizingX(d, w, kc);
+
+  const ns = (60 * d.freq) / d.p;                // senkron devir [d/dk]
+  const s = (ns - d.speed) / ns;
+  const op = solveSlip(d, Xm, s);
+
+  const Pout = op.Pmech - d.Pfw;
+  const eta = op.Pin > 0 ? Math.max(0, Pout) / op.Pin : 0;
+
+  // --- Moment / kayma eğrisi ---
+  const curve = [];
+  for (let i = 0; i <= 120; i++) {
+    const sv = 1 - i / 120;
+    const r = solveSlip(d, Xm, sv);
+    curve.push({ s: sv, n: ns * (1 - sv), T: r.T, I: r.I1 });
+  }
+  const peak = curve.reduce((a, b) => (b.T > a.T ? b : a));
+  const start = solveSlip(d, Xm, 1);
+
+  // --- Manyetik akı: stator empedansı düşüldükten sonraki hava aralığı EMK'si ---
+  const E = Math.max(1, op.V - op.I1 * (d.Rs * op.pf + d.Xls * Math.sqrt(1 - op.pf ** 2)));
+  const Phi = E / (4.44 * d.freq * w.Nph * w.kw1);   // kutup başına akı [Wb]
+  const tau_p = g.tau_p * mm;
+  const Bg = (Math.PI / 2) * Phi / (tau_p * d.L1 * mm);  // tepe hava aralığı akısı
+  const Bt = (Bg * g.tau_s * mm) / (d.W3 * mm * d.Kf1);
+  const By = Phi / (2 * g.hy * mm * d.L1 * mm * d.Kf1);
+  const Btr = (Bg * c.tau_r * mm) / (c.W3r * mm * d.Kf1);
+  const Byr = Phi / (2 * c.hyr * mm * d.L1 * mm * d.Kf1);
+
+  // --- İletken / doluluk ---
+  const A_wire = ((Math.PI * (d.Wwire * mm) ** 2) / 4) * d.Nwppc;
+  const fill = (A_wire * d.Ntcoil * d.Nlayer) / (g.A_slot * mm * mm);
+  const J = op.I1 / (A_wire * 1e6);
+  const Jbar = op.I2 * (2 * w.Nph * w.kw1 * 3) / (d.Zr) / c.A_bar; // çubuk akım yoğunluğu
+
+  // --- Kütleler ---
+  const vol = (ro, ri) => Math.PI * (ro ** 2 - ri ** 2) * d.L1 * mm ** 3;
+  const V_yoke = vol(d.Rext, g.r3) * d.Kf1;
+  const V_teeth = d.Zs * d.W3 * (d.H1 + d.H2) * d.L1 * mm ** 3 * d.Kf1;
+  const V_rot = (vol(c.Rr, c.Rsh) - d.Zr * c.A_bar * d.L1 * mm ** 3) * d.Kf1;
+  const Lend = 1.2 * d.coil_pitch * g.tau_s * mm + 0.02;
+  const V_cu = 3 * w.Nph * d.Npcp * 2 * (d.L1 * mm + Lend) * A_wire;
+  const mass = {
+    steel: (V_yoke + V_teeth + V_rot) * M.steel.rho,
+    copper: V_cu * M.copper.rho,
+    cage: d.Zr * c.A_bar * mm * mm * (d.L1 * mm) * 2700, // alüminyum kafes
+  };
+  mass.total = mass.steel + mass.copper + mass.cage;
+
+  // --- Demir kaybı ---
+  const specLoss = (B) => M.steel.p15 * (B / 1.5) ** 2 * (d.freq / 50) ** 1.5;
+  const Pfe = specLoss(By) * V_yoke * M.steel.rho + specLoss(Bt) * V_teeth * M.steel.rho;
+
+  return {
+    type: "scim", geom: g, cage: c, wind: w,
+    kc, kc_s, kc_r, Xm, ns, s, ...op,
+    Pout, eta, Pfe, Pfw: d.Pfw,
+    Phi, Bg, Bt, By, Btr, Byr,
+    fill, J, Jbar, A_wire, mass, curve,
+    peakT: peak.T, peakS: peak.s, peakN: peak.n,
+    Tstart: start.T, Ilr: start.I1,
+    f: d.freq,
+  };
+}
+
+/** Etiket değerleriyle karşılaştırma. */
+function nameplate(d, r) {
+  const p = d.plate;
+  if (!p) return [];
+  const cmp = (n, calc, plate, u, dec = 2) => ({
+    n, calc, plate, u,
+    dev: plate ? (calc - plate) / plate : 0,
+    txt: `${calc.toFixed(dec)} / ${plate.toFixed(dec)}`,
+  });
+  return [
+    cmp("Senkron devir", r.ns, p.nsync, "d/dk", 0),
+    cmp("Nominal moment", r.T, p.T, "N·m"),
+    cmp("Çıkış gücü", r.Pout, p.Pout, "W", 0),
+    cmp("Faz akımı", r.I1, p.I, "A"),
+    cmp("Güç faktörü", r.pf, p.pf, "", 3),
+    cmp("Verim", r.eta * 100, p.eta * 100, "%", 1),
+    cmp("Kalkış momenti", r.Tstart, p.Tstart, "N·m"),
+    cmp("Kilitli rotor akımı", r.Ilr, p.Ilr, "A"),
+    cmp("Net oluk alanı", r.geom.A_slot, p.Aslot, "mm²", 2),
+  ];
+}
+
+function checksSCIM(d, r) {
+  const out = [];
+  const add = (level, label, msg) => out.push({ level, label, msg });
+
+  if (r.Bt > 2.0) add("crit", "Diş doyumu", `Stator dişi ${r.Bt.toFixed(2)} T — doymuş.`);
+  else if (r.Bt > 1.8) add("warn", "Diş doyumu", `Stator dişi ${r.Bt.toFixed(2)} T — dizin noktasında.`);
+  if (r.Btr > 2.0) add("crit", "Rotor dişi", `${r.Btr.toFixed(2)} T — doymuş.`);
+  else if (r.Btr > 1.8) add("warn", "Rotor dişi", `${r.Btr.toFixed(2)} T — sınırda.`);
+  if (r.By > 1.7) add("warn", "Stator boyunduruğu", `${r.By.toFixed(2)} T.`);
+  if (r.Byr > 1.7) add("warn", "Rotor boyunduruğu", `${r.Byr.toFixed(2)} T.`);
+
+  if (r.fill > 0.50) add("crit", "Oluk doluluğu", `%${(r.fill * 100).toFixed(0)} — sığmaz.`);
+  else if (r.fill > 0.42) add("warn", "Oluk doluluğu", `%${(r.fill * 100).toFixed(0)} — zorlayıcı.`);
+  if (r.J > 12) add("crit", "Akım yoğunluğu", `${r.J.toFixed(1)} A/mm² — soğutma yetmez.`);
+  else if (r.J > 7) add("warn", "Akım yoğunluğu", `${r.J.toFixed(1)} A/mm² — zorlanmış soğutma gerekir.`);
+
+  if (r.s <= 0) add("warn", "Çalışma noktası", "Devir senkron hızın üstünde — makine generatör bölgesinde.");
+  if (r.T > r.peakT) add("crit", "Devrilme", "Çalışma momenti devrilme momentini aşıyor — motor durur.");
+  else if (r.T > 0.75 * r.peakT)
+    add("warn", "Devrilme payı", `Devrilme momentinin %${((r.T / r.peakT) * 100).toFixed(0)}'ünde çalışıyor.`);
+
+  // Oluk sayısı uyumu (gürültü ve asalak moment kuralları)
+  const diff = Math.abs(d.Zs - d.Zr);
+  if (d.Zs === d.Zr) add("crit", "Oluk uyumu", "Stator ve rotor oluk sayısı eşit — kilitlenme riski.");
+  else if (diff === 2 * d.p)
+    add("warn", "Oluk uyumu", `|Zs − Zr| = 2p — eşzamanlı asalak moment riski.`);
+  if (gcd(d.Zs, d.Zr) > 2 * d.p)
+    add("warn", "Oluk uyumu", `OBEB(${d.Zs}, ${d.Zr}) büyük — gürültü ve titreşim riski.`);
+
+  if (!r.wind.balanced) add("crit", "Sargı dengesi", "Dengeli üç fazlı sargı oluşmuyor.");
+
+  if (out.length === 0) add("ok", "Tasarım", "Tüm kontroller sınırlar içinde.");
+  return out;
+}
+
+/* --- Tip dağıtıcıları --- */
+const analyseAny = (d) => (d.type === "scim" ? analyseSCIM(d) : analyse(d));
+const checksAny = (d, r) => (d.type === "scim" ? checksSCIM(d, r) : checks(d, r));
+const toPyleecanAny = (d) => (d.type === "scim" ? toPyleecanSCIM(d) : toPyleecan(d));
+
 /* ------------------------------------------------------------------ *
  * Tasarım kuralları — uyarı üretimi
  * ------------------------------------------------------------------ */
@@ -752,63 +1098,593 @@ function toPyleecan(d) {
   };
 }
 
+/**
+ * Sincap kafesli asenkron makine dışa aktarımı.
+ * Kafes, pyleecan'in yerleşik gösterimiyle verilir: her çubuk kendi fazı
+ * (qs = çubuk sayısı), tek sarım, dikdörtgen iletken (CondType21).
+ */
+function toPyleecanSCIM(d) {
+  const g = geometry(d);
+  const c = cageGeometry(d);
+  const m = 1e-3;
+  const steel = mat(MATERIALS.steel);
+
+  return {
+    __class__: "MachineSCIM",
+    name: d.name,
+    desc: "Motor Tasarım Atölyesi tarafından üretildi",
+    type_machine: 1,
+    stator: {
+      __class__: "LamSlotWind",
+      Rint: d.Rint * m, Rext: d.Rext * m, L1: d.L1 * m, Kf1: d.Kf1,
+      is_internal: false, is_stator: true, Nrvd: 0, Wrvd: 0,
+      mat_type: steel,
+      slot: {
+        __class__: "SlotW11",
+        Zs: d.Zs, W0: d.W0 * m, H0: d.H0 * m,
+        H1: d.H1 * m, H1_is_rad: false,
+        W1: g.W1 * m, H2: d.H2 * m, W2: g.W2 * m,
+        is_cstt_tooth: true, W3: d.W3 * m, R1: d.R1 * m,
+      },
+      winding: {
+        __class__: "Winding",
+        qs: d.qs, p: d.p, Ntcoil: d.Ntcoil, Npcp: d.Npcp,
+        Nlayer: d.Nlayer, coil_pitch: d.coil_pitch,
+        type_connection: d.connection === "delta" ? 1 : 0,
+        is_wye: d.connection !== "delta",
+        is_reverse_wind: false, Nslot_shift_wind: 0,
+        conductor: {
+          __class__: "CondType12",
+          Wwire: d.Wwire * m, Wins_wire: 0.03 * m,
+          Wins_cond: (d.Wwire + 0.06) * m, Nwppc: d.Nwppc,
+          cond_mat: mat(MATERIALS.copper),
+          ins_mat: mat(MATERIALS.insulation),
+        },
+      },
+    },
+    rotor: {
+      __class__: "LamSquirrelCage",
+      Rint: c.Rsh * m, Rext: c.Rr * m, L1: d.L1 * m, Kf1: d.Kf1,
+      is_internal: true, is_stator: false, Nrvd: 0, Wrvd: 0,
+      mat_type: steel,
+      Hscr: d.Hbar * m,
+      Lscr: (2 * d.Wbar) * m,
+      ring_mat: mat(MATERIALS.aluminium),
+      slot: {
+        __class__: "SlotW21",
+        Zs: d.Zr, W0: d.W0r * m, H0: d.H0r * m,
+        H1: 0, H1_is_rad: false,
+        W1: d.Wbar * m, H2: d.Hbar * m, W2: d.Wbar * 0.7 * m,
+      },
+      winding: {
+        __class__: "Winding",
+        qs: d.Zr, p: d.p, Ntcoil: 1, Npcp: 1,
+        Nlayer: 1, coil_pitch: 0,
+        type_connection: -1, is_wye: false,
+        is_reverse_wind: false, Nslot_shift_wind: 0,
+        conductor: {
+          __class__: "CondType21",
+          Hbar: d.Hbar * m, Wbar: d.Wbar * m, Wins: 0,
+          cond_mat: mat(MATERIALS.aluminium),
+          ins_mat: mat(MATERIALS.insulation),
+        },
+      },
+    },
+    shaft: {
+      __class__: "Shaft",
+      Lshaft: (d.L1 + 40) * m, Drsh: d.Drsh * m,
+      mat_type: mat(MATERIALS.shaft),
+    },
+    frame: null,
+  };
+}
+
+
+/**
+ * Bağımsız WebGL görüntüleyici — harici kütüphane yok.
+ *
+ * Motorun tüm parçaları 2B kesit profillerinin eksen boyunca ötelenmesiyle
+ * (extrusion) üretilir. Kesit alma, parçaları ayırma (patlatılmış görünüm),
+ * döndürme ve yakınlaştırma desteklenir.
+ *
+ * Eksen düzeni: motor ekseni +Z, kesit düzlemi XY — 2B çizimle aynı.
+ */
+
+/* ------------------------------------------------------------------ *
+ * Küçük matris kütüphanesi (sütun öncelikli, WebGL düzeni)
+ * ------------------------------------------------------------------ */
+const M4 = {
+  identity: () => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]),
+
+  perspective(fovY, aspect, near, far) {
+    const f = 1 / Math.tan(fovY / 2);
+    const nf = 1 / (near - far);
+    return new Float32Array([
+      f / aspect, 0, 0, 0,
+      0, f, 0, 0,
+      0, 0, (far + near) * nf, -1,
+      0, 0, 2 * far * near * nf, 0,
+    ]);
+  },
+
+  multiply(a, b) {
+    const o = new Float32Array(16);
+    for (let c = 0; c < 4; c++)
+      for (let r = 0; r < 4; r++) {
+        let s = 0;
+        for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
+        o[c * 4 + r] = s;
+      }
+    return o;
+  },
+
+  /**
+   * Tornatabla kamerası:  V = T(0,0,-d) · Rx(elev) · Ry(azim)
+   * azim = 0 motorun yüzünü (kesit düzlemini), azim = π/2 yan görünüşü verir.
+   */
+  orbit(azim, elev, dist) {
+    const ca = Math.cos(azim), sa = Math.sin(azim);
+    const ce = Math.cos(elev), se = Math.sin(elev);
+    return new Float32Array([
+      ca, se * sa, -ce * sa, 0,
+      0, ce, se, 0,
+      sa, -se * ca, ce * ca, 0,
+      0, 0, -dist, 1,
+    ]);
+  },
+};
+
+/* ------------------------------------------------------------------ *
+ * Ağ (mesh) üretimi
+ * ------------------------------------------------------------------ */
+class MeshBuilder {
+  constructor() { this.v = []; }
+
+  /** Üçgen ekler; normal köşelerden hesaplanır (düz gölgeleme). */
+  tri(a, b, c) {
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const L = Math.hypot(nx, ny, nz) || 1;
+    nx /= L; ny /= L; nz /= L;
+    for (const p of [a, b, c]) this.v.push(p[0], p[1], p[2], nx, ny, nz);
+  }
+
+  quad(a, b, c, d) { this.tri(a, b, c); this.tri(a, c, d); }
+
+  /**
+   * Halka/boru: rIn..rOut yarıçapları arasında, z0..z1 boyunca,
+   * a0..a1 açı aralığında. rIn = 0 ise dolu silindir.
+   */
+  tube(rIn, rOut, z0, z1, a0 = 0, a1 = Math.PI * 2, seg = 72) {
+    const n = Math.max(3, Math.ceil((seg * (a1 - a0)) / (Math.PI * 2)));
+    const P = (r, a, z) => [r * Math.cos(a), r * Math.sin(a), z];
+    for (let i = 0; i < n; i++) {
+      const A = a0 + ((a1 - a0) * i) / n, B = a0 + ((a1 - a0) * (i + 1)) / n;
+      // dış yüzey
+      this.quad(P(rOut, A, z0), P(rOut, B, z0), P(rOut, B, z1), P(rOut, A, z1));
+      // iç yüzey (ters yön)
+      if (rIn > 0)
+        this.quad(P(rIn, A, z1), P(rIn, B, z1), P(rIn, B, z0), P(rIn, A, z0));
+      // uç halkalar
+      this.quad(P(rIn, A, z1), P(rOut, A, z1), P(rOut, B, z1), P(rIn, B, z1));
+      this.quad(P(rOut, A, z0), P(rIn, A, z0), P(rIn, B, z0), P(rOut, B, z0));
+    }
+  }
+
+  /**
+   * Şerit prizma: her seviye {r, half} (yarıçap ve yarı açı) verir.
+   * Merkez açısı ac olan, z0..z1 boyunca ötelenmiş katı üretir.
+   */
+  ribbon(levels, ac, z0, z1) {
+    const P = (r, a, z) => [r * Math.cos(a), r * Math.sin(a), z];
+    const L = levels.map((s) => P(s.r, ac + s.half, z0));
+    const R = levels.map((s) => P(s.r, ac - s.half, z0));
+    const L1 = levels.map((s) => P(s.r, ac + s.half, z1));
+    const R1 = levels.map((s) => P(s.r, ac - s.half, z1));
+
+    for (let i = 0; i < levels.length - 1; i++) {
+      // ön ve arka yüzler
+      this.quad(R[i], L[i], L[i + 1], R[i + 1]);
+      this.quad(L1[i], R1[i], R1[i + 1], L1[i + 1]);
+      // yan duvarlar
+      this.quad(L[i], L1[i], L1[i + 1], L[i + 1]);
+      this.quad(R1[i], R[i], R[i + 1], R1[i + 1]);
+    }
+    // uç kapaklar (iç ve dış yarıçapta)
+    const n = levels.length - 1;
+    this.quad(L[0], R[0], R1[0], L1[0]);
+    this.quad(R[n], L[n], L1[n], R1[n]);
+  }
+
+  data() { return new Float32Array(this.v); }
+  get count() { return this.v.length / 6; }
+}
+
+/* ------------------------------------------------------------------ *
+ * Motor geometrisi -> parçalar
+ * ------------------------------------------------------------------ */
+
+/** Oluk profilinin r yarıçapındaki yarı genişliği (mm). */
+function slotHalf(d, g, r) {
+  if (r <= g.r1) return d.W0 / 2;
+  if (r <= g.r2) {
+    const t = (r - g.r1) / Math.max(1e-6, g.r2 - g.r1);
+    return d.W0 / 2 + t * (g.halfWidth(g.r2) - d.W0 / 2);
+  }
+  return g.halfWidth(r);
+}
+
+/** Bir yarıçapta diş yarı açısı (oluklar arasında kalan malzeme). */
+const toothHalf = (d, g, r, Z) =>
+  Math.max(0.002, Math.PI / Z - Math.asin(Math.min(0.999, slotHalf(d, g, r) / r)));
+
+function levelsBetween(rA, rB, fn, n = 6) {
+  const out = [];
+  for (let i = 0; i <= n; i++) {
+    const r = rA + ((rB - rA) * i) / n;
+    out.push({ r, half: fn(r) });
+  }
+  return out;
+}
+
+/**
+ * Tasarımdan parça listesi üretir.
+ * Her parça: { key, label, color, mesh, axial } — axial patlatma yönüdür.
+ */
+function buildParts(d, r, colors) {
+  const g = r.geom;
+  const hz = d.L1 / 2;
+  const isSCIM = d.type === "scim";
+  const parts = [];
+
+  const push = (key, label, color, axial, fn) => {
+    const m = new MeshBuilder();
+    fn(m);
+    if (m.count) parts.push({ key, label, color, axial, data: m.data(), count: m.count });
+  };
+
+  // --- Stator boyunduruğu ---
+  push("yoke", "Stator boyunduruğu", colors.lam, 0, (m) =>
+    m.tube(g.r3, d.Rext, -hz, hz));
+
+  // --- Stator dişleri ---
+  push("teeth", "Stator dişleri", colors.tooth, 0, (m) => {
+    const lv = levelsBetween(g.r0, g.r3, (rr) => toothHalf(d, g, rr, d.Zs), 8);
+    for (let k = 0; k < d.Zs; k++)
+      m.ribbon(lv, ((k + 0.5) * Math.PI * 2) / d.Zs, -hz, hz);
+  });
+
+  // --- Sargılar: oluk içi iletken demetleri, faz rengiyle ---
+  const nLay = Math.max(1, d.Nlayer);
+  const span = g.r3 - g.r2 - 0.6;
+  for (let ph = 0; ph < 3; ph++) {
+    push(`w${ph}`, `Faz ${"ABC"[ph]} sargısı`, colors.phase[ph], 0, (m) => {
+      for (let k = 0; k < d.Zs; k++) {
+        const layers = nLay >= 2 ? [r.wind.top[k], r.wind.bot[k]] : [r.wind.top[k]];
+        layers.forEach((L, i) => {
+          if (!L || L.ph !== ph) return;
+          const rA = g.r2 + 0.3 + (span / nLay) * i;
+          const rB = rA + (span / nLay) * 0.86;
+          const lv = levelsBetween(rA, rB, (rr) =>
+            Math.asin(Math.min(0.999, Math.max(0.01, slotHalf(d, g, rr) - 0.45) / rr)), 3);
+          m.ribbon(lv, (k * Math.PI * 2) / d.Zs, -hz, hz);
+        });
+      }
+    });
+  }
+
+  // --- Sargı başları: her iki uçta bakır halka ---
+  const endLen = Math.max(3, 0.55 * d.coil_pitch * g.tau_s);
+  push("endw", "Sargı başları", colors.phase[0], 0, (m) => {
+    m.tube(g.r2 + 0.3, g.r3 - 0.3, hz, hz + endLen);
+    m.tube(g.r2 + 0.3, g.r3 - 0.3, -hz - endLen, -hz);
+  });
+
+  // --- Rotor ---
+  if (isSCIM) {
+    const c = r.cage;
+    // rotor dişleri (çubuklar arası sac)
+    push("rteeth", "Rotor sacı", colors.rotor, -1, (m) => {
+      const half = (rr) =>
+        Math.max(0.002, Math.PI / d.Zr -
+          Math.asin(Math.min(0.999, (rr > c.rb1 ? d.W0r / 2 : d.Wbar / 2) / rr)));
+      const lv = levelsBetween(c.rb0, c.Rr, half, 5);
+      for (let k = 0; k < d.Zr; k++)
+        m.ribbon(lv, ((k + 0.5) * Math.PI * 2) / d.Zr, -hz, hz);
+      m.tube(c.Rsh, c.rb0, -hz, hz);
+    });
+    // kafes çubukları
+    push("bars", "Kafes çubukları", colors.cage, -1, (m) => {
+      const lv = levelsBetween(c.rb0 + 0.15, c.rb1, (rr) =>
+        Math.asin(Math.min(0.999, (d.Wbar / 2 - 0.05) / rr)), 3);
+      for (let k = 0; k < d.Zr; k++)
+        m.ribbon(lv, (k * Math.PI * 2) / d.Zr, -hz, hz);
+    });
+    // kısa devre halkaları
+    push("rings", "Kısa devre halkaları", colors.cage, -1, (m) => {
+      const w = 2 * d.Wbar;
+      m.tube(c.rb0, c.rb1, hz, hz + w);
+      m.tube(c.rb0, c.rb1, -hz - w, -hz);
+    });
+  } else {
+    push("rlam", "Rotor sacı", colors.rotor, -1, (m) =>
+      m.tube(g.Rsh, g.Rm_in, -hz, hz));
+    push("mag", "Mıknatıslar", colors.magnet, -1, (m) => {
+      const half = g.Wmag_rad / 2;
+      for (let k = 0; k < 2 * d.p; k++) {
+        const a = (k * Math.PI * 2) / (2 * d.p);
+        m.tube(g.Rm_in, g.Rr, -hz, hz, a - half, a + half, 96);
+      }
+    });
+  }
+
+  // --- Mil ---
+  const shR = (isSCIM ? r.cage.Rsh : g.Rsh);
+  const stub = Math.max(10, 0.3 * d.L1);
+  push("shaft", "Mil", colors.shaft, -1, (m) =>
+    m.tube(0, shR, -hz - stub, hz + stub));
+
+  return parts;
+}
+
+/* ------------------------------------------------------------------ *
+ * Gölgelendiriciler
+ * ------------------------------------------------------------------ */
+const VS = `
+attribute vec3 aPos;
+attribute vec3 aNor;
+uniform mat4 uProj, uView;
+uniform float uAxial;      // patlatma ötelemesi
+varying vec3 vNor, vModel;
+void main() {
+  vec3 p = aPos + vec3(0.0, 0.0, uAxial);
+  vNor = aNor;
+  vModel = aPos;
+  gl_Position = uProj * uView * vec4(p, 1.0);
+}`;
+
+const FS = `
+precision mediump float;
+varying vec3 vNor, vModel;
+uniform vec3 uColor;
+uniform vec2 uCut;         // x: dilimin merkez açısı, y: yarı genişliği
+uniform float uCutOn;
+void main() {
+  if (uCutOn > 0.5) {
+    // dilim daima kameraya baksın: merkeze göre sarmalı fark
+    float delta = atan(vModel.y, vModel.x) - uCut.x;
+    delta = mod(delta + 3.14159265, 6.28318531) - 3.14159265;
+    if (abs(delta) < uCut.y) discard;
+  }
+  // çift taraflı aydınlatma: kesitte iç yüzeyler de doğru görünsün
+  vec3 n = normalize(vNor);
+  if (!gl_FrontFacing) n = -n;
+
+  vec3 key  = normalize(vec3(0.45, 0.55, 0.75));
+  vec3 fill = normalize(vec3(-0.6, -0.35, 0.35));
+  float d = max(dot(n, key), 0.0) * 0.78
+          + max(dot(n, fill), 0.0) * 0.26
+          + 0.28;
+  // kenar aydınlatması, biçimi ayırmak için
+  float rim = pow(1.0 - abs(n.z), 3.0) * 0.10;
+  gl_FragColor = vec4(uColor * d + rim, 1.0);
+}`;
+
+function compile(gl, type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+    throw new Error(gl.getShaderInfoLog(s) || "gölgelendirici derlenemedi");
+  return s;
+}
+
+/* ------------------------------------------------------------------ *
+ * Görüntüleyici
+ * ------------------------------------------------------------------ */
+function createViewer(canvas) {
+  const gl = canvas.getContext("webgl", { antialias: true, alpha: true });
+  if (!gl) return null;
+
+  const prog = gl.createProgram();
+  gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VS));
+  gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
+    throw new Error(gl.getProgramInfoLog(prog) || "program bağlanamadı");
+  gl.useProgram(prog);
+
+  const loc = {
+    pos: gl.getAttribLocation(prog, "aPos"),
+    nor: gl.getAttribLocation(prog, "aNor"),
+    proj: gl.getUniformLocation(prog, "uProj"),
+    view: gl.getUniformLocation(prog, "uView"),
+    color: gl.getUniformLocation(prog, "uColor"),
+    axial: gl.getUniformLocation(prog, "uAxial"),
+    cut: gl.getUniformLocation(prog, "uCut"),
+    cutOn: gl.getUniformLocation(prog, "uCutOn"),
+  };
+  gl.enableVertexAttribArray(loc.pos);
+  gl.enableVertexAttribArray(loc.nor);
+  gl.enable(gl.DEPTH_TEST);
+
+  const state = {
+    azim: Math.PI / 2 + 0.6, elev: 0.38, dist: 5.4,
+    cut: 0, explode: 0, spin: false,
+    hidden: new Set(),
+  };
+  let parts = [], buffers = [], radius = 1, bg = [0, 0, 0, 0];
+  let raf = 0, dirty = true;
+
+  function setParts(next, extent) {
+    for (const b of buffers) gl.deleteBuffer(b);
+    parts = next; buffers = [];
+    radius = extent;
+    for (const p of parts) {
+      const b = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, b);
+      gl.bufferData(gl.ARRAY_BUFFER, p.data, gl.STATIC_DRAW);
+      buffers.push(b);
+    }
+    dirty = true;
+  }
+
+  function draw() {
+    raf = 0;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = Math.max(1, Math.round(canvas.clientWidth * dpr));
+    const h = Math.max(1, Math.round(canvas.clientHeight * dpr));
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    gl.viewport(0, 0, w, h);
+    gl.clearColor(bg[0], bg[1], bg[2], bg[3]);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // dar görüş açısı: yakındaki sargı başlarının statordan büyük görünmesini engeller
+    const proj = M4.perspective(0.5, w / h, radius * 0.05, radius * 60);
+    const view = M4.orbit(state.azim, state.elev, radius * state.dist);
+    gl.uniformMatrix4fv(loc.proj, false, proj);
+    gl.uniformMatrix4fv(loc.view, false, view);
+
+    // Kamera model uzayında nerede duruyorsa dilimi oraya çevir, böylece
+    // hangi açıdan bakılırsa bakılsın kesit açık kalır.
+    const ce = Math.cos(state.elev), se = Math.sin(state.elev);
+    const camAngle = Math.atan2(se, -ce * Math.sin(state.azim));
+    gl.uniform1f(loc.cutOn, state.cut > 0.001 ? 1 : 0);
+    gl.uniform2f(loc.cut, camAngle, state.cut * Math.PI);
+
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      if (state.hidden.has(p.key)) continue;
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffers[i]);
+      gl.vertexAttribPointer(loc.pos, 3, gl.FLOAT, false, 24, 0);
+      gl.vertexAttribPointer(loc.nor, 3, gl.FLOAT, false, 24, 12);
+      gl.uniform3fv(loc.color, p.color);
+      gl.uniform1f(loc.axial, p.axial * state.explode * radius * 1.1);
+      gl.drawArrays(gl.TRIANGLES, 0, p.count);
+    }
+
+    if (state.spin) { state.azim += 0.006; schedule(); }
+  }
+
+  function schedule() { if (!raf) raf = requestAnimationFrame(draw); }
+
+  /* --- Etkileşim: sürükle, tekerlek, iki parmakla yakınlaştırma --- */
+  const pointers = new Map();
+  let lastPinch = 0;
+
+  canvas.addEventListener("pointerdown", (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    state.spin = false;
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    const prev = pointers.get(e.pointerId);
+    if (!prev) return;
+    const cur = { x: e.clientX, y: e.clientY };
+    if (pointers.size === 1) {
+      state.azim -= (cur.x - prev.x) * 0.009;
+      state.elev = Math.max(-1.45, Math.min(1.45, state.elev + (cur.y - prev.y) * 0.009));
+      schedule();
+    }
+    pointers.set(e.pointerId, cur);
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      if (lastPinch) {
+        state.dist = Math.max(3, Math.min(18, state.dist * (lastPinch / dist)));
+        schedule();
+      }
+      lastPinch = dist;
+    }
+  });
+  const release = (e) => {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) lastPinch = 0;
+  };
+  canvas.addEventListener("pointerup", release);
+  canvas.addEventListener("pointercancel", release);
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    state.dist = Math.max(3, Math.min(18, state.dist * (1 + Math.sign(e.deltaY) * 0.12)));
+    schedule();
+  }, { passive: false });
+
+  return {
+    setParts, schedule, state,
+    setBackground(rgba) { bg = rgba; schedule(); },
+    setView(azim, elev) { state.azim = azim; state.elev = elev; state.spin = false; schedule(); },
+    dispose() {
+      cancelAnimationFrame(raf);
+      for (const b of buffers) gl.deleteBuffer(b);
+    },
+  };
+}
+
+
 
 
 /* ------------------------------------------------------------------ *
  * Durum
  * ------------------------------------------------------------------ */
-const STORE = "ivq.motor.design";
+const STORE = "ivq.motor.design.v2";
 let D = load();
-let view = "winding"; // winding | flux | plain
+let view = "winding"; // winding | flux | plain | 3d
+let viewer = null;
 
 function load() {
   try {
     const raw = localStorage.getItem(STORE);
-    if (raw) return { ...defaultDesign(), ...JSON.parse(raw) };
+    if (raw) {
+      const saved = JSON.parse(raw);
+      const base = saved.type === "spm" ? defaultSPM() : defaultDesign();
+      return { ...base, ...saved };
+    }
   } catch { /* depolama yoksa varsayılana düş */ }
   return defaultDesign();
 }
-function save() {
+const save = () => {
   try { localStorage.setItem(STORE, JSON.stringify(D)); } catch { /* yok say */ }
-}
+};
 
 /* ------------------------------------------------------------------ *
  * Parametre tanımları
  * ------------------------------------------------------------------ */
-const GROUPS = [
-  {
-    name: "Stator laminasyonu",
-    items: [
-      ["Rext", "Dış yarıçap", 40, 160, 0.5, "mm"],
-      ["Rint", "Delik yarıçapı", 15, 130, 0.5, "mm"],
-      ["L1", "Paket boyu", 10, 250, 1, "mm"],
-      ["Kf1", "İstifleme faktörü", 0.85, 1.0, 0.01, ""],
-    ],
-  },
-  {
-    name: "Oluk profili (SlotW11)",
-    items: [
-      ["Zs", "Oluk sayısı", 3, 72, 3, ""],
-      ["W3", "Diş genişliği", 1, 40, 0.1, "mm"],
-      ["H2", "Oluk derinliği", 2, 50, 0.5, "mm"],
-      ["W0", "Oluk ağzı", 0.5, 15, 0.1, "mm"],
-      ["H0", "Ağız yüksekliği", 0.2, 6, 0.1, "mm"],
-      ["H1", "Kama yüksekliği", 0, 8, 0.1, "mm"],
-      ["R1", "Dip yarıçapı", 0, 6, 0.1, "mm"],
-    ],
-  },
-  {
-    name: "Sargı",
-    items: [
-      ["p", "Kutup çifti", 1, 24, 1, ""],
-      ["Nlayer", "Katman sayısı", 1, 2, 1, ""],
-      ["coil_pitch", "Bobin adımı", 1, 24, 1, "oluk"],
-      ["Ntcoil", "Bobin başına sarım", 1, 300, 1, ""],
-      ["Npcp", "Paralel kol", 1, 8, 1, ""],
-      ["Wwire", "Tel çapı", 0.2, 3, 0.05, "mm"],
-      ["Nwppc", "Paralel tel", 1, 20, 1, ""],
-    ],
-  },
+const G_STATOR = {
+  name: "Stator laminasyonu",
+  items: [
+    ["Rext", "Dış yarıçap", 20, 160, 0.5, "mm"],
+    ["Rint", "Delik yarıçapı", 10, 130, 0.5, "mm"],
+    ["L1", "Paket boyu", 10, 250, 1, "mm"],
+    ["Kf1", "İstifleme faktörü", 0.85, 1.0, 0.01, ""],
+  ],
+};
+const G_SLOT = {
+  name: "Stator oluğu (SlotW11)",
+  items: [
+    ["Zs", "Oluk sayısı", 3, 72, 3, ""],
+    ["W3", "Diş genişliği", 0.5, 40, 0.02, "mm"],
+    ["H2", "Oluk derinliği", 1, 50, 0.1, "mm"],
+    ["W0", "Oluk ağzı", 0.3, 15, 0.1, "mm"],
+    ["H0", "Ağız yüksekliği", 0.2, 6, 0.1, "mm"],
+    ["H1", "Kama yüksekliği", 0, 8, 0.1, "mm"],
+    ["R1", "Dip yarıçapı", 0, 6, 0.1, "mm"],
+  ],
+};
+const G_WIND = {
+  name: "Sargı",
+  items: [
+    ["p", "Kutup çifti", 1, 24, 1, ""],
+    ["Nlayer", "Katman sayısı", 1, 2, 1, ""],
+    ["coil_pitch", "Bobin adımı", 1, 24, 1, "oluk"],
+    ["Ntcoil", "Bobin başına sarım", 1, 300, 1, ""],
+    ["Npcp", "Paralel kol", 1, 8, 1, ""],
+    ["Wwire", "Tel çapı", 0.1, 3, 0.01, "mm"],
+    ["Nwppc", "Paralel tel", 1, 20, 1, ""],
+  ],
+};
+const GROUPS_SPM = [
+  G_STATOR, G_SLOT, G_WIND,
   {
     name: "Rotor ve mıknatıs",
     items: [
@@ -828,9 +1704,45 @@ const GROUPS = [
     ],
   },
 ];
+const GROUPS_SCIM = [
+  G_STATOR, G_SLOT, G_WIND,
+  {
+    name: "Rotor kafesi",
+    items: [
+      ["Zr", "Rotor çubuk sayısı", 8, 96, 1, ""],
+      ["gap", "Hava aralığı", 0.15, 5, 0.05, "mm"],
+      ["Hbar", "Çubuk yüksekliği", 1, 25, 0.1, "mm"],
+      ["Wbar", "Çubuk genişliği", 0.5, 12, 0.1, "mm"],
+      ["W0r", "Rotor oluk ağzı", 0.2, 6, 0.1, "mm"],
+      ["H0r", "Rotor ağız yüksekliği", 0.1, 4, 0.1, "mm"],
+      ["Drsh", "Mil çapı", 5, 120, 1, "mm"],
+    ],
+  },
+  {
+    name: "Besleme",
+    items: [
+      ["Vline", "Hat gerilimi", 12, 690, 1, "V"],
+      ["freq", "Frekans", 10, 1000, 5, "Hz"],
+      ["speed", "Çalışma devri", 0, 20000, 25, "d/dk"],
+    ],
+  },
+  {
+    name: "Eşdeğer devre (faz başına)",
+    items: [
+      ["Rs", "Stator direnci Rs", 0.05, 40, 0.01, "Ω"],
+      ["Xls", "Stator kaçak Xls", 0.05, 60, 0.01, "Ω"],
+      ["Rr", "Rotor direnci Rr", 0.05, 40, 0.01, "Ω"],
+      ["Xlr", "Rotor kaçak Xlr", 0.05, 60, 0.01, "Ω"],
+      ["Xm", "Mıknatıslanma Xm", 0, 400, 0.5, "Ω"],
+      ["Pfw", "Sürtünme + rüzgâr", 0, 400, 5, "W"],
+      ["Twind", "Sargı sıcaklığı", 20, 180, 5, "°C"],
+    ],
+  },
+];
+const groupsFor = (d) => (d.type === "scim" ? GROUPS_SCIM : GROUPS_SPM);
 
 /* ------------------------------------------------------------------ *
- * Biçimlendirme
+ * Biçimlendirme yardımcıları
  * ------------------------------------------------------------------ */
 const fx = (v, n = 2) => (Number.isFinite(v) ? v.toFixed(n) : "—");
 const el = (t, cls, txt) => {
@@ -846,36 +1758,41 @@ const svgEl = (t, attrs) => {
   return e;
 };
 
-/* Doyma / yük seviyesine göre ısı rengi */
-function heat(val, lo, hi) {
-  const t = Math.max(0, Math.min(1, (val - lo) / (hi - lo)));
-  return ramp(t, [[63, 110, 140], [78, 140, 107], [201, 162, 39], [178, 62, 42]]);
-}
-
-/* Kalite rengi: düşük = kötü (kırmızı), yüksek = iyi (yeşil) */
-function quality(val, lo, hi) {
-  const t = Math.max(0, Math.min(1, (val - lo) / (hi - lo)));
-  return ramp(t, [[164, 62, 45], [186, 133, 40], [96, 141, 92], [55, 122, 96]]);
-}
-
 function ramp(t, stops) {
-  const x = t * (stops.length - 1);
+  const x = Math.max(0, Math.min(1, t)) * (stops.length - 1);
   const i = Math.min(stops.length - 2, Math.floor(x));
   const f = x - i;
-  const c = stops[i].map((a, k) => Math.round(a + (stops[i + 1][k] - a) * f));
-  return `rgb(${c.join(",")})`;
+  return stops[i].map((a, k) => Math.round(a + (stops[i + 1][k] - a) * f));
 }
+const heat = (v, lo, hi) =>
+  `rgb(${ramp((v - lo) / (hi - lo), [[63,110,140],[78,140,107],[201,162,39],[178,62,42]])})`;
+const quality = (v, lo, hi) =>
+  `rgb(${ramp((v - lo) / (hi - lo), [[164,62,45],[186,133,40],[96,141,92],[55,122,96]])})`;
 const sevB = (b, warn, crit) => (b > crit ? "crit" : b > warn ? "warn" : "ok");
 
+/** CSS değişkenini WebGL için 0–1 aralığında RGB'ye çevirir. */
+function cssRGB(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const m = v.match(/^#([0-9a-f]{6})$/i);
+  if (m) {
+    const n = parseInt(m[1], 16);
+    return new Float32Array([(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]);
+  }
+  const r = v.match(/rgba?\(([^)]+)\)/);
+  if (r) {
+    const p = r[1].split(",").map(Number);
+    return new Float32Array([p[0] / 255, p[1] / 255, p[2] / 255]);
+  }
+  return new Float32Array(fallback);
+}
+
 /* ------------------------------------------------------------------ *
- * Kesit çizimi
+ * 2B kesit çizimi
  * ------------------------------------------------------------------ */
 const pt = (r, a) => [r * Math.cos(a), -r * Math.sin(a)];
 const fmtPt = ([x, y]) => `${x.toFixed(3)},${y.toFixed(3)}`;
 
-/** İç ve dış yarıçap arasında, a1..a2 açısını kapsayan halka dilimi. */
 function sectorPath(rIn, rOut, a1, a2, hIn, hOut) {
-  // hIn/hOut verilirse yarıçapa göre değişen yarı-açı kullanılır
   const A1o = hOut != null ? -hOut : a1, A2o = hOut != null ? hOut : a2;
   const A1i = hIn != null ? -hIn : a1, A2i = hIn != null ? hIn : a2;
   const large = Math.abs(A2o - A1o) > Math.PI ? 1 : 0;
@@ -888,60 +1805,61 @@ function sectorPath(rIn, rOut, a1, a2, hIn, hOut) {
   ].join(" ");
 }
 
-/** Tek bir oluğun profili (merkez açısı 0'da; dışarıda döndürülür). */
+const ang = (r, w) => Math.asin(Math.min(0.999, Math.max(0, w) / r));
+
 function slotPath(d, g) {
-  const ang = (r, w) => Math.asin(Math.min(0.999, w / r));
   const { r0, r1, r2, r3 } = g;
   const w0 = d.W0 / 2;
   const a0 = ang(r0, w0), a1 = ang(r1, w0);
   const a2 = ang(r2, g.halfWidth(r2));
   const a3 = ang(r3, g.halfWidth(r3));
   const R1 = Math.min(d.R1, d.H2 / 2, g.halfWidth(r3) * 0.9);
-  const dA = R1 / r3;
-  const rc = r3 - R1;
-
+  const dA = R1 / r3, rc = r3 - R1;
   return [
-    `M ${fmtPt(pt(r0, a0))}`,
-    `L ${fmtPt(pt(r1, a1))}`,
-    `L ${fmtPt(pt(r2, a2))}`,
+    `M ${fmtPt(pt(r0, a0))}`, `L ${fmtPt(pt(r1, a1))}`, `L ${fmtPt(pt(r2, a2))}`,
     `L ${fmtPt(pt(rc, a3))}`,
     `Q ${fmtPt(pt(r3, a3))} ${fmtPt(pt(r3, Math.max(0, a3 - dA)))}`,
     `A ${r3} ${r3} 0 0 0 ${fmtPt(pt(r3, -Math.max(0, a3 - dA)))}`,
     `Q ${fmtPt(pt(r3, -a3))} ${fmtPt(pt(rc, -a3))}`,
-    `L ${fmtPt(pt(r2, -a2))}`,
-    `L ${fmtPt(pt(r1, -a1))}`,
-    `L ${fmtPt(pt(r0, -a0))}`,
-    `A ${r0} ${r0} 0 0 1 ${fmtPt(pt(r0, a0))}`,
-    "Z",
+    `L ${fmtPt(pt(r2, -a2))}`, `L ${fmtPt(pt(r1, -a1))}`, `L ${fmtPt(pt(r0, -a0))}`,
+    `A ${r0} ${r0} 0 0 1 ${fmtPt(pt(r0, a0))}`, "Z",
+  ].join(" ");
+}
+
+/** Rotor kafes oluğu profili. */
+function barPath(d, c) {
+  const aO = ang(c.Rr, d.W0r / 2), aO1 = ang(c.rb1, d.W0r / 2);
+  const aB = ang(c.rb1, d.Wbar / 2), aB0 = ang(c.rb0, d.Wbar * 0.35);
+  const rc = c.rb0 + d.Wbar * 0.3;
+  return [
+    `M ${fmtPt(pt(c.Rr, aO))}`, `L ${fmtPt(pt(c.rb1, aO1))}`, `L ${fmtPt(pt(c.rb1, aB))}`,
+    `L ${fmtPt(pt(rc, aB0))}`,
+    `A ${c.rb0} ${c.rb0} 0 0 0 ${fmtPt(pt(rc, -aB0))}`,
+    `L ${fmtPt(pt(c.rb1, -aB))}`, `L ${fmtPt(pt(c.rb1, -aO1))}`, `L ${fmtPt(pt(c.Rr, -aO))}`,
+    `A ${c.Rr} ${c.Rr} 0 0 1 ${fmtPt(pt(c.Rr, aO))}`, "Z",
   ].join(" ");
 }
 
 function drawSection(r) {
   const g = r.geom, w = r.wind;
   const R = D.Rext * 1.06;
-  const svg = svgEl("svg", { viewBox: `${-R} ${-R} ${2 * R} ${2 * R}`, role: "img",
-    "aria-label": `${D.Zs} oluk ${w.poles} kutup motor kesiti` });
-
+  const svg = svgEl("svg", {
+    viewBox: `${-R} ${-R} ${2 * R} ${2 * R}`, role: "img",
+    "aria-label": `${D.Zs} oluk ${w.poles} kutup motor kesiti`,
+  });
   const add = (t, a) => { const e = svgEl(t, a); svg.appendChild(e); return e; };
-
-  const fluxView = view === "flux";
-  // Not: sunum özniteliği (fill=) CSS sınıfına yenilir; ısı rengi satır içi
-  // stil olarak verilmeli.
+  const flux = view === "flux";
   const tint = (c) => (c ? { style: `fill:${c}` } : {});
 
-  // Stator: boyunduruk -> diş bölgesi -> delik
-  add("circle", { r: D.Rext, class: "lam-yoke", ...tint(fluxView && heat(r.By, 0.6, 2.0)) });
-  add("circle", { r: g.r3, class: "lam-teeth", ...tint(fluxView && heat(r.Bt, 0.6, 2.0)) });
+  add("circle", { r: D.Rext, class: "lam-yoke", ...tint(flux && heat(r.By, 0.6, 2.0)) });
+  add("circle", { r: g.r3, class: "lam-teeth", ...tint(flux && heat(r.Bt, 0.6, 2.0)) });
   add("circle", { r: D.Rint, class: "air" });
 
-  // Oluklar + sargı
   const path = slotPath(D, g);
   const nLay = Math.max(1, D.Nlayer);
   for (let k = 0; k < D.Zs; k++) {
-    const rot = (360 * k) / D.Zs;
-    const grp = add("g", { transform: `rotate(${-rot})` });
+    const grp = add("g", { transform: `rotate(${-(360 * k) / D.Zs})` });
     grp.appendChild(svgEl("path", { d: path, class: "slot-air" }));
-
     if (view === "winding") {
       const layers = nLay >= 2 ? [w.top[k], w.bot[k]] : [w.top[k]];
       const span = g.r3 - g.r2 - 0.6;
@@ -949,45 +1867,94 @@ function drawSection(r) {
         if (!L) return;
         const rA = g.r2 + 0.3 + (span / nLay) * i;
         const rB = rA + (span / nLay) * 0.86;
-        const inset = 0.55;
-        const hIn = Math.asin(Math.min(0.999, Math.max(0, g.halfWidth(rA) - inset) / rA));
-        const hOut = Math.asin(Math.min(0.999, Math.max(0, g.halfWidth(rB) - inset) / rB));
         grp.appendChild(svgEl("path", {
-          d: sectorPath(rA, rB, 0, 0, hIn, hOut),
+          d: sectorPath(rA, rB, 0, 0,
+            ang(rA, g.halfWidth(rA) - 0.55), ang(rB, g.halfWidth(rB) - 0.55)),
           class: `wnd${L.ph}${L.s < 0 ? " wnd-neg" : ""}`,
         }));
       });
     }
   }
 
-  // Rotor
-  add("circle", { r: g.Rr, class: "rotor-st", ...tint(fluxView && heat(r.Bry, 0.6, 2.0)) });
-  const half = g.Wmag_rad / 2;
-  for (let k = 0; k < w.poles; k++) {
-    const c = (k * 2 * Math.PI) / w.poles;
-    add("path", {
-      d: sectorPath(g.Rm_in, g.Rr, c - half, c + half),
-      class: k % 2 ? "mag-s" : "mag-n",
-    });
+  if (D.type === "scim") {
+    const c = r.cage;
+    add("circle", { r: c.Rr, class: "rotor-st", ...tint(flux && heat(r.Btr, 0.6, 2.0)) });
+    add("circle", { r: c.rb0, class: "rotor-st", ...tint(flux && heat(r.Byr, 0.6, 2.0)) });
+    const bp = barPath(D, c);
+    for (let k = 0; k < D.Zr; k++)
+      add("path", { d: bp, class: "cage-bar", transform: `rotate(${-(360 * k) / D.Zr})` });
+    add("circle", { r: c.Rsh, class: "shaft-f" });
+    for (const rr of [D.Rext, g.r3, D.Rint, c.Rr, c.rb0, c.Rsh])
+      if (rr > 0) add("circle", { r: rr, class: "edge" });
+  } else {
+    add("circle", { r: g.Rr, class: "rotor-st", ...tint(flux && heat(r.Bry, 0.6, 2.0)) });
+    const half = g.Wmag_rad / 2;
+    for (let k = 0; k < w.poles; k++) {
+      const a = (k * Math.PI * 2) / w.poles;
+      add("path", { d: sectorPath(g.Rm_in, g.Rr, a - half, a + half), class: k % 2 ? "mag-s" : "mag-n" });
+    }
+    add("circle", { r: g.Rsh, class: "shaft-f" });
+    for (const rr of [D.Rext, g.r3, D.Rint, g.Rr, g.Rm_in, g.Rsh])
+      if (rr > 0) add("circle", { r: rr, class: "edge" });
   }
-  add("circle", { r: g.Rsh, class: "shaft-f" });
-
-  // Kenar çizgileri
-  for (const rr of [D.Rext, g.r3, D.Rint, g.Rr, g.Rm_in, g.Rsh])
-    if (rr > 0) add("circle", { r: rr, class: "edge" });
-
   return svg;
 }
 
 /* ------------------------------------------------------------------ *
- * Kurulum — statik iskelet
+ * Moment / devir eğrisi
  * ------------------------------------------------------------------ */
-const app = document.getElementById("app");
+function drawCurve(r) {
+  const W = 320, H = 150, pad = { l: 34, r: 8, t: 10, b: 22 };
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img",
+    "aria-label": "Moment devir eğrisi" });
+  const add = (t, a) => { const e = svgEl(t, a); svg.appendChild(e); return e; };
 
-app.innerHTML = `
+  // Bozuk geometride hesap sonsuza gidebilir; eksenleri her hâlükârda geçerli tut.
+  const fin = (x, alt = 0) => (Number.isFinite(x) ? x : alt);
+  const maxT = Math.max(0.01, fin(Math.max(r.peakT, r.T)) * 1.15);
+  const ns = Math.max(1, fin(r.ns, 1));
+  const X = (n) => pad.l + ((W - pad.l - pad.r) * Math.max(0, Math.min(ns, fin(n)))) / ns;
+  const Y = (t) => H - pad.b - ((H - pad.t - pad.b) * Math.max(0, Math.min(maxT, fin(t)))) / maxT;
+
+  // ızgara
+  for (let i = 0; i <= 4; i++) {
+    const t = (maxT * i) / 4;
+    add("line", { x1: pad.l, x2: W - pad.r, y1: Y(t), y2: Y(t), class: "grid" });
+    add("text", { x: pad.l - 4, y: Y(t) + 3, class: "tick", "text-anchor": "end" })
+      .textContent = t.toFixed(1);
+  }
+  for (const n of [0, ns / 2, ns])
+    add("text", { x: X(n), y: H - 6, class: "tick", "text-anchor": "middle" })
+      .textContent = String(Math.round(n));
+
+  add("path", {
+    d: r.curve.map((c, i) => `${i ? "L" : "M"} ${X(c.n).toFixed(2)} ${Y(c.T).toFixed(2)}`).join(" "),
+    class: "curve",
+  });
+
+  // işaretler
+  const mark = (n, t, cls, label) => {
+    add("circle", { cx: X(n), cy: Y(t), r: 3.2, class: cls });
+    add("text", { x: X(n) + (n > r.ns * 0.6 ? -6 : 6), y: Y(t) - 6, class: "pointlbl",
+      "text-anchor": n > r.ns * 0.6 ? "end" : "start" }).textContent = label;
+  };
+  mark(0, r.Tstart, "pt-start", "kalkış");
+  mark(r.peakN, r.peakT, "pt-peak", "devrilme");
+  mark(D.speed, r.T, "pt-op", "çalışma");
+  return svg;
+}
+
+/* ------------------------------------------------------------------ *
+ * İskelet
+ * ------------------------------------------------------------------ */
+document.getElementById("app").innerHTML = `
 <div class="masthead">
   <h1>Motor Tasarım Atölyesi</h1>
-  <span class="sub">SPM · analitik çekirdek · pyleecan uyumlu</span>
+  <span class="sub" id="sub"></span>
+  <div class="types" role="group" aria-label="Makine tipi">
+    <button class="chip" data-type="scim">Asenkron</button>
+    <button class="chip" data-type="spm">Mıknatıslı</button>
+  </div>
 </div>
 
 <div class="instrument">
@@ -996,17 +1963,35 @@ app.innerHTML = `
       <button class="chip" data-view="winding" aria-pressed="true">Sargı</button>
       <button class="chip" data-view="flux" aria-pressed="false">Akı</button>
       <button class="chip" data-view="plain" aria-pressed="false">Sade</button>
+      <button class="chip" data-view="3d" aria-pressed="false">3B</button>
     </div>
     <div id="stage"></div>
+    <canvas id="gl" hidden></canvas>
+  </div>
+  <div class="d3panel" id="d3panel" hidden>
+    <div class="d3row">
+      <label>Kesit<input type="range" id="cut" min="0" max="0.5" step="0.01" value="0"></label>
+      <label>Ayır<input type="range" id="exp" min="0" max="1" step="0.01" value="0"></label>
+    </div>
+    <div class="d3row chips" id="d3views"></div>
+    <div class="d3row chips" id="d3parts"></div>
   </div>
   <div class="vitals" id="vitals"></div>
 </div>
 
 <div class="stream">
+<section id="sec-plate" hidden><h2>Etiket karşılaştırması</h2><div class="card">
+  <div class="rows" id="plate"></div>
+  <p class="note">Sol sütun modelin hesabı, sağ sütun dokümandaki değer.</p>
+</div></section>
+
+<section id="sec-curve" hidden><h2>Moment / devir</h2><div class="card">
+  <div id="curve"></div>
+  <p class="note">Yatay eksen devir (d/dk), dikey eksen moment (N·m).</p>
+</div></section>
+
 <section><h2>Kontroller</h2><div class="card" id="ctrls"></div></section>
-
 <section><h2>Tasarım kontrolü</h2><div class="card" id="checks"></div></section>
-
 <section><h2>Sonuçlar</h2><div class="card"><div class="results" id="results"></div></div></section>
 
 <section><h2>Sargı yerleşimi</h2><div class="card">
@@ -1014,13 +1999,11 @@ app.innerHTML = `
   <p class="note" id="layout-note"></p>
 </div></section>
 
-<section><h2>Sargı faktörü harmonikleri</h2><div class="card">
-  <div class="harm" id="harm"></div>
-</div></section>
+<section><h2>Sargı faktörü harmonikleri</h2><div class="card"><div class="harm" id="harm"></div></div></section>
 
 <section><h2>Oluk / kutup matrisi</h2><div class="card">
   <div class="scroller"><table class="matrix" id="matrix"></table></div>
-  <p class="note">Hücre değeri temel sargı faktörü kw₁. Bir hücreye dokunarak o kombinasyona geçebilirsiniz. Soluk hücreler dengeli üç fazlı sargı vermez.</p>
+  <p class="note">Hücre değeri temel sargı faktörü kw₁. Dokununca o kombinasyona geçilir. Soluk hücreler dengeli üç fazlı sargı vermez.</p>
 </div></section>
 
 <section><h2>Dışa aktar</h2><div class="card">
@@ -1029,29 +2012,52 @@ app.innerHTML = `
     <button class="act ghost" id="exp-design">Tasarım JSON</button>
     <button class="act ghost" id="reset">Varsayılana dön</button>
   </div>
-  <p class="note">Pyleecan JSON doğrudan <code>pyleecan.Functions.load.load()</code> ile açılır; sınıf adları ve SI birimleri (metre) şemaya uygundur. Sonraki adımda bu dosya FEMM üzerinden doğrusal olmayan manyetostatik analize gönderilecek.</p>
+  <p class="note">Pyleecan JSON doğrudan <code>pyleecan.Functions.load.load()</code> ile açılır.</p>
 </div></section>
 
-<p class="note">Bu araç analitik manyetik devre modeli kullanır — hızlı ön tasarım içindir, FEA yerine geçmez.
-Doyma, Carter katsayısı, sıcaklığa bağlı remanans ve yıldız diyagramı sargı faktörü hesaba katılmıştır.</p>
+<p class="note">Analitik model — hızlı ön tasarım içindir, sonlu elemanlar analizinin yerine geçmez.</p>
 </div>
 `;
 
-/* --- Kontrolleri oluştur --- */
-const ctrlEls = {};
-{
+/* --- Makine tipi --- */
+for (const b of document.querySelectorAll(".chip[data-type]"))
+  b.addEventListener("click", () => {
+    if (D.type === b.dataset.type) return;
+    D = b.dataset.type === "spm" ? defaultSPM() : defaultDesign();
+    save(); buildControls(); render();
+  });
+
+/* --- Görünüm --- */
+for (const b of document.querySelectorAll(".chip[data-view]"))
+  b.addEventListener("click", () => {
+    view = b.dataset.view;
+    for (const o of document.querySelectorAll(".chip[data-view]"))
+      o.setAttribute("aria-pressed", String(o.dataset.view === view));
+    render();
+  });
+
+/* --- Parametre denetimleri --- */
+let ctrlEls = {};
+function buildControls() {
   const host = document.getElementById("ctrls");
-  for (const grp of GROUPS) {
+  host.replaceChildren();
+  ctrlEls = {};
+  for (const grp of groupsFor(D)) {
     const gEl = el("div", "group");
     gEl.appendChild(el("span", "lbl", grp.name));
     const box = el("div", "ctrls");
     for (const [key, label, min, max, step, unit] of grp.items) {
       const c = el("div", "ctrl");
-      const lab = el("label", null);
+      const lab = el("label", null, label);
       lab.htmlFor = `c-${key}`;
-      lab.textContent = label;
       const num = el("div", "num");
-      const input = svgInput(key, min, max, step);
+      const input = document.createElement("input");
+      Object.assign(input, { type: "range", id: `c-${key}`, min, max, step, value: D[key] });
+      input.addEventListener("input", () => {
+        D[key] = parseFloat(input.value);
+        if (key === "Zs") D.coil_pitch = Math.min(D.coil_pitch, D.Zs);
+        save(); render();
+      });
       c.append(lab, num, input);
       box.appendChild(c);
       ctrlEls[key] = { num, input, unit, step };
@@ -1059,74 +2065,173 @@ const ctrlEls = {};
     gEl.appendChild(box);
     host.appendChild(gEl);
   }
+  // bağlantı biçimi seçimi (yalnızca asenkron)
+  if (D.type === "scim") {
+    const gEl = el("div", "group");
+    gEl.appendChild(el("span", "lbl", "Bağlantı"));
+    const box = el("div", "chips");
+    for (const [k, t] of [["delta", "Üçgen"], ["wye", "Yıldız"]]) {
+      const b = el("button", "chip", t);
+      b.setAttribute("aria-pressed", String(D.connection === k));
+      b.onclick = () => { D.connection = k; save(); buildControls(); render(); };
+      box.appendChild(b);
+    }
+    gEl.appendChild(box);
+    host.appendChild(gEl);
+  }
 }
-function svgInput(key, min, max, step) {
-  const i = document.createElement("input");
-  i.type = "range"; i.id = `c-${key}`;
-  i.min = min; i.max = max; i.step = step; i.value = D[key];
-  i.addEventListener("input", () => {
-    D[key] = parseFloat(i.value);
-    if (key === "Zs" || key === "p") D.coil_pitch = Math.min(D.coil_pitch, D.Zs);
-    save();
-    render();
-  });
-  return i;
-}
-
-/* --- Görünüm düğmeleri --- */
-for (const b of document.querySelectorAll(".chip[data-view]")) {
-  b.addEventListener("click", () => {
-    view = b.dataset.view;
-    for (const o of document.querySelectorAll(".chip[data-view]"))
-      o.setAttribute("aria-pressed", String(o.dataset.view === view));
-    render();
-  });
-}
+const syncInputs = () => {
+  for (const [k, c] of Object.entries(ctrlEls)) c.input.value = D[k];
+};
 
 /* --- Dışa aktarma --- */
 const download = (name, obj) => {
   const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = name;
-  a.click();
+  a.download = name; a.click();
   URL.revokeObjectURL(a.href);
 };
-document.getElementById("exp-pyl").onclick = () => download(`${D.name}.json`, toPyleecan(D));
+document.getElementById("exp-pyl").onclick = () => download(`${D.name}.json`, toPyleecanAny(D));
 document.getElementById("exp-design").onclick = () => download(`${D.name}-design.json`, D);
-document.getElementById("reset").onclick = () => { D = defaultDesign(); save(); syncInputs(); render(); };
+document.getElementById("reset").onclick = () => {
+  D = D.type === "spm" ? defaultSPM() : defaultDesign();
+  save(); buildControls(); render();
+};
 
-function syncInputs() {
-  for (const [k, c] of Object.entries(ctrlEls)) c.input.value = D[k];
+/* ------------------------------------------------------------------ *
+ * 3B görünüm
+ * ------------------------------------------------------------------ */
+const canvas = document.getElementById("gl");
+const d3panel = document.getElementById("d3panel");
+let partList = [];
+
+function colors3d() {
+  return {
+    lam: cssRGB("--lam", [0.78, 0.82, 0.85]),
+    tooth: cssRGB("--lam-tooth", [0.84, 0.88, 0.90]),
+    rotor: cssRGB("--rotor", [0.66, 0.72, 0.76]),
+    shaft: cssRGB("--shaft", [0.58, 0.65, 0.68]),
+    magnet: cssRGB("--magnet", [0.42, 0.38, 0.57]),
+    cage: cssRGB("--cage", [0.72, 0.74, 0.76]),
+    phase: [cssRGB("--copper", [0.71, 0.44, 0.24]),
+            cssRGB("--steel", [0.29, 0.45, 0.57]),
+            cssRGB("--verdigris", [0.25, 0.48, 0.40])],
+  };
+}
+
+function setup3d() {
+  if (viewer) return true;
+  try { viewer = createViewer(canvas); } catch { viewer = null; }
+  if (!viewer) return false;
+
+  document.getElementById("cut").addEventListener("input", (e) => {
+    viewer.state.cut = parseFloat(e.target.value); viewer.schedule();
+  });
+  document.getElementById("exp").addEventListener("input", (e) => {
+    viewer.state.explode = parseFloat(e.target.value); viewer.schedule();
+  });
+
+  const views = document.getElementById("d3views");
+  const HALF = Math.PI / 2;
+  const presets = [
+    ["Açı", HALF + 0.6, 0.38],   // üç çeyrek
+    ["Ön", 0, 0],                // kesit düzlemi karşıdan
+    ["Yan", HALF, 0],            // eksen yatay
+    ["Arka", Math.PI, 0],        // arkadan
+    ["Üst", HALF, 1.4],          // tepeden
+  ];
+  for (const [t, y, p] of presets) {
+    const b = el("button", "chip", t);
+    b.onclick = () => viewer.setView(y, p);
+    views.appendChild(b);
+  }
+  const spin = el("button", "chip", "Döndür");
+  spin.onclick = () => {
+    viewer.state.spin = !viewer.state.spin;
+    spin.setAttribute("aria-pressed", String(viewer.state.spin));
+    viewer.schedule();
+  };
+  views.appendChild(spin);
+  return true;
+}
+
+function update3d(r) {
+  if (!setup3d()) {
+    canvas.hidden = true;
+    document.getElementById("stage").replaceChildren(
+      el("p", "note", "Bu tarayıcıda WebGL kullanılamıyor; 3B görünüm devre dışı."));
+    return;
+  }
+  partList = buildParts(D, r, colors3d());
+  const extent = Math.max(D.Rext, D.L1 / 2 + Math.max(10, 0.3 * D.L1));
+  viewer.setParts(partList, extent);
+  viewer.setBackground([0, 0, 0, 0]);
+
+  const host = document.getElementById("d3parts");
+  host.replaceChildren();
+  for (const p of partList) {
+    const b = el("button", "chip", p.label);
+    const on = () => !viewer.state.hidden.has(p.key);
+    b.setAttribute("aria-pressed", String(on()));
+    b.onclick = () => {
+      if (on()) viewer.state.hidden.add(p.key); else viewer.state.hidden.delete(p.key);
+      b.setAttribute("aria-pressed", String(on()));
+      viewer.schedule();
+    };
+    host.appendChild(b);
+  }
+  viewer.schedule();
 }
 
 /* ------------------------------------------------------------------ *
  * Render
  * ------------------------------------------------------------------ */
 function render() {
-  const r = analyse(D);
+  const r = analyseAny(D);
   const w = r.wind;
+  const isSCIM = D.type === "scim";
 
-  // Kesit
+  document.getElementById("sub").textContent = isSCIM
+    ? `sincap kafesli asenkron · ${D.Zs}/${D.Zr} oluk · ${2 * D.p} kutup · ${D.freq} Hz`
+    : `yüzey mıknatıslı senkron · ${D.Zs} oluk · ${w.poles} kutup`;
+  for (const b of document.querySelectorAll(".chip[data-type]"))
+    b.setAttribute("aria-pressed", String(b.dataset.type === D.type));
+
+  // --- Sahne ---
+  const is3d = view === "3d";
+  canvas.hidden = !is3d;
+  d3panel.hidden = !is3d;
   const stage = document.getElementById("stage");
-  stage.replaceChildren(drawSection(r));
+  stage.hidden = is3d;
+  if (is3d) update3d(r); else stage.replaceChildren(drawSection(r));
+
   if (view === "flux") {
     const key = el("div", "fluxkey");
     const bar = el("div", "ramp");
-    bar.style.background = `linear-gradient(90deg, ${[0, 0.25, 0.5, 0.75, 1]
+    bar.style.background = `linear-gradient(90deg, ${[0, .25, .5, .75, 1]
       .map((t) => heat(0.6 + t * 1.4, 0.6, 2.0)).join(",")})`;
     key.append(el("span", null, "0.6"), bar, el("span", null, "2.0 T"));
     stage.appendChild(key);
   }
 
-  // Kontrol değerleri
+  // --- Denetim değerleri ---
   for (const [k, c] of Object.entries(ctrlEls)) {
     const dec = c.step >= 1 ? 0 : c.step >= 0.1 ? 1 : 2;
     c.num.innerHTML = `${fx(D[k], dec)}${c.unit ? ` <span>${c.unit}</span>` : ""}`;
   }
 
-  // Hayati değerler
-  const vitals = [
+  // --- Hayati değerler ---
+  const vitals = isSCIM ? [
+    ["Bδ", fx(r.Bg, 3), "T", "ok"],
+    ["B diş", fx(r.Bt, 2), "T", sevB(r.Bt, 1.8, 2.0)],
+    ["B boy.", fx(r.By, 2), "T", sevB(r.By, 1.6, 1.8)],
+    ["Kayma", fx(r.s * 100, 1), "%", r.s <= 0 ? "warn" : "ok"],
+    ["Moment", fx(r.T, 2), "N·m", r.T > r.peakT ? "crit" : "ok"],
+    ["Çıkış", fx(r.Pout, 0), "W", "ok"],
+    ["Akım", fx(r.I1, 2), "A", "ok"],
+    ["Verim", fx(r.eta * 100, 1), "%", "ok"],
+  ] : [
     ["Bδ", fx(r.Bg, 3), "T", "ok"],
     ["B diş", fx(r.Bt, 2), "T", sevB(r.Bt, 1.8, 2.0)],
     ["B boy.", fx(r.By, 2), "T", sevB(r.By, 1.6, 1.8)],
@@ -1136,8 +2241,7 @@ function render() {
     ["Doluluk", fx(r.fill * 100, 0), "%", r.fill > 0.5 ? "crit" : r.fill > 0.42 ? "warn" : "ok"],
     ["Verim", fx(r.eta * 100, 1), "%", "ok"],
   ];
-  const vHost = document.getElementById("vitals");
-  vHost.replaceChildren(...vitals.map(([k, v, u, sev]) => {
+  document.getElementById("vitals").replaceChildren(...vitals.map(([k, v, u, sev]) => {
     const t = el("div", "vital");
     t.dataset.sev = sev;
     t.appendChild(el("div", "k", k));
@@ -1147,43 +2251,85 @@ function render() {
     return t;
   }));
 
-  // Kontroller
-  const cHost = document.getElementById("checks");
-  cHost.replaceChildren(...checks(D, r).map((c) => {
+  // --- Etiket karşılaştırması ---
+  const plateSec = document.getElementById("sec-plate");
+  const cmp = isSCIM ? nameplate(D, r) : [];
+  plateSec.hidden = cmp.length === 0;
+  if (cmp.length) {
+    document.getElementById("plate").replaceChildren(...cmp.map((c) => {
+      const e = el("div", "row");
+      e.appendChild(el("div", "n", c.n));
+      const v = el("div", "v");
+      const lvl = Math.abs(c.dev) > 0.15 ? "crit" : Math.abs(c.dev) > 0.08 ? "warn" : "ok";
+      v.innerHTML = `${c.txt} <span>${c.u}</span> <b data-l="${lvl}">${
+        (c.dev * 100 >= 0 ? "+" : "")}${(c.dev * 100).toFixed(1)}%</b>`;
+      e.appendChild(v);
+      return e;
+    }));
+  }
+
+  // --- Moment / devir eğrisi ---
+  const curveSec = document.getElementById("sec-curve");
+  curveSec.hidden = !isSCIM;
+  if (isSCIM) document.getElementById("curve").replaceChildren(drawCurve(r));
+
+  // --- Kontroller ---
+  document.getElementById("checks").replaceChildren(...checksAny(D, r).map((c) => {
     const e = el("div", "check");
     e.dataset.l = c.level;
-    e.appendChild(el("div", "dot"));
-    e.appendChild(el("div", "t", c.label));
-    e.appendChild(el("div", "m", c.msg));
+    e.append(el("div", "dot"), el("div", "t", c.label), el("div", "m", c.msg));
     return e;
   }));
 
-  // Sonuçlar
-  const rows = [
+  // --- Sonuçlar ---
+  const rows = isSCIM ? [
+    ["Oluk: stator / rotor", `${D.Zs} / ${D.Zr}`, ""],
+    ["Kutup sayısı", String(2 * D.p), ""],
+    ["Senkron devir", fx(r.ns, 0), "d/dk"],
+    ["Kayma", fx(r.s * 100, 2), "%"],
+    ["Faz gerilimi", fx(r.V, 1), "V"],
+    ["Mıknatıslanma Xm", fx(r.Xm, 2), "Ω"],
+    ["Carter katsayısı", fx(r.kc, 3), ""],
+    ["Kutup başına akı", fx(r.Phi * 1e3, 3), "mWb"],
+    ["Rotor dişi B", fx(r.Btr, 2), "T"],
+    ["Rotor boyunduruğu B", fx(r.Byr, 2), "T"],
+    ["Faz akımı", fx(r.I1, 3), "A"],
+    ["Rotor akımı (indirg.)", fx(r.I2, 3), "A"],
+    ["Güç faktörü", fx(r.pf, 3), ""],
+    ["Hava aralığı gücü", fx(r.Pgap, 1), "W"],
+    ["Giriş gücü", fx(r.Pin, 1), "W"],
+    ["Çıkış gücü", fx(r.Pout, 1), "W"],
+    ["Stator bakır kaybı", fx(r.Pcus, 1), "W"],
+    ["Rotor kaybı", fx(r.Pcur, 1), "W"],
+    ["Demir kaybı", fx(r.Pfe, 1), "W"],
+    ["Devrilme momenti", fx(r.peakT, 2), "N·m"],
+    ["Devrilme kayması", fx(r.peakS * 100, 1), "%"],
+    ["Kalkış momenti", fx(r.Tstart, 2), "N·m"],
+    ["Kilitli rotor akımı", fx(r.Ilr, 2), "A"],
+    ["Oluk doluluğu", fx(r.fill * 100, 1), "%"],
+    ["Akım yoğunluğu", fx(r.J, 2), "A/mm²"],
+    ["Net oluk alanı", fx(r.geom.A_slot, 2), "mm²"],
+    ["Boyunduruk kalınlığı", fx(r.geom.hy, 2), "mm"],
+    ["Rotor dış çapı", fx(r.cage.Rr * 2, 2), "mm"],
+    ["Toplam kütle", fx(r.mass.total, 3), "kg"],
+  ] : [
     ["Oluk / kutup", `${D.Zs} / ${w.poles}`, ""],
     ["q (oluk/kutup/faz)", w.q.toFixed(3), ""],
     ["Vuruntu periyodu OKEK", String(w.cogPeriod), ""],
-    ["Makine periyodikliği t", String(w.t), ""],
     ["Faz başına sarım", w.Nph.toFixed(0), ""],
     ["Carter katsayısı", fx(r.kc, 3), ""],
     ["Remanans (sıcak)", fx(r.Brm, 3), "T"],
     ["Temel akı, kutup", fx(r.Phi1 * 1e3, 3), "mWb"],
-    ["Rotor boyunduruğu B", fx(r.Bry, 2), "T"],
     ["Temel frekans", fx(r.f, 1), "Hz"],
     ["Ters EMK (faz)", fx(r.Erms, 1), "V rms"],
-    ["Moment sabiti", fx(1.5 * D.p * w.kw1 * w.Nph * r.Phi1, 4), "N·m/A"],
     ["Akım yoğunluğu", fx(r.J, 2), "A/mm²"],
     ["Faz direnci", fx(r.Rph, 4), "Ω"],
     ["Bakır kaybı", fx(r.Pcu, 1), "W"],
     ["Demir kaybı", fx(r.Pfe, 1), "W"],
     ["Moment yoğunluğu", fx(r.torqueDensity, 2), "N·m/kg"],
-    ["Kütle — sac", fx(r.mass.steel, 2), "kg"],
-    ["Kütle — bakır", fx(r.mass.copper, 2), "kg"],
-    ["Kütle — mıknatıs", fx(r.mass.magnet, 3), "kg"],
     ["Toplam kütle", fx(r.mass.total, 2), "kg"],
     ["Oluk alanı", fx(r.geom.A_slot, 1), "mm²"],
     ["Boyunduruk kalınlığı", fx(r.geom.hy, 2), "mm"],
-    ["Oluk üst / dip genişliği", `${fx(r.geom.W1, 1)} / ${fx(r.geom.W2, 1)}`, "mm"],
   ];
   document.getElementById("results").replaceChildren(...rows.map(([n, v, u]) => {
     const e = el("div", "row");
@@ -1194,8 +2340,7 @@ function render() {
     return e;
   }));
 
-  // Sargı yerleşimi
-  const lHost = document.getElementById("layout");
+  // --- Sargı yerleşimi ---
   const cols = [];
   for (let k = 0; k < D.Zs; k++) {
     const col = el("div", "slotcol");
@@ -1209,12 +2354,12 @@ function render() {
     }
     cols.push(col);
   }
-  lHost.replaceChildren(...cols);
+  document.getElementById("layout").replaceChildren(...cols);
   document.getElementById("layout-note").textContent =
     `${D.Nlayer === 2 ? "Çift" : "Tek"} katman, bobin adımı ${D.coil_pitch} oluk. ` +
-    `Üst satır oluk ağzına yakın katman. İşaret iletken yönünü gösterir.`;
+    "Üst satır oluk ağzına yakın katman.";
 
-  // Harmonikler
+  // --- Harmonikler ---
   document.getElementById("harm").replaceChildren(...w.harmonics.map(({ n, kw }) => {
     const b = el("div", "bar");
     b.appendChild(el("div", "k", kw.toFixed(2)));
@@ -1222,8 +2367,7 @@ function render() {
     const fill = el("div", "fill");
     fill.style.height = `${Math.max(1, kw * 100)}%`;
     stalk.appendChild(fill);
-    b.appendChild(stalk);
-    b.appendChild(el("div", "n", `ν${n}`));
+    b.append(stalk, el("div", "n", `ν${n}`));
     return b;
   }));
 
@@ -1231,11 +2375,10 @@ function render() {
 }
 
 /* --- Oluk/kutup matrisi --- */
-const M_SLOTS = [3, 6, 9, 12, 15, 18, 24, 27, 36, 48];
+const M_SLOTS = [3, 6, 9, 12, 18, 24, 27, 36, 48, 54];
 const M_POLES = [2, 4, 6, 8, 10, 12, 14, 16, 20, 22];
 
 function renderMatrix() {
-  const t = document.getElementById("matrix");
   const head = el("tr");
   head.appendChild(el("th", null, "Zs \\ 2p"));
   for (const P2 of M_POLES) head.appendChild(el("th", null, String(P2)));
@@ -1263,9 +2406,10 @@ function renderMatrix() {
     }
     rows.push(tr);
   }
-  t.replaceChildren(...rows);
+  document.getElementById("matrix").replaceChildren(...rows);
 }
 
+buildControls();
 render();
 
 </script>

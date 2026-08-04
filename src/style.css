@@ -25,6 +25,7 @@
   --lam-tooth: #D6E0E6;
   --rotor:     #A9B8C1;
   --shaft:     #94A5AE;
+  --cage:      #9FA8AC;
   --air:       #EDF1F3;
 
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
@@ -58,6 +59,7 @@
     --lam-tooth: #2C3E48;
     --rotor:     #374954;
     --shaft:     #3B4C56;
+    --cage:      #56646A;
     --air:       #0B1115;
     color-scheme: dark;
   }
@@ -69,7 +71,7 @@
   --ink: #DCE6EB; --ink-2: #92A5B0; --ink-3: #64757F;
   --copper: #D08B52; --steel: #6C9BBD; --verdigris: #58A188; --magnet: #9086BA;
   --ok: #59B583; --warn: #D6A93C; --crit: #E0745A;
-  --lam: #24333C; --lam-tooth: #2C3E48; --rotor: #374954; --shaft: #3B4C56;
+  --lam: #24333C; --lam-tooth: #2C3E48; --rotor: #374954; --shaft: #3B4C56; --cage: #56646A;
   --air: #0B1115;
   color-scheme: dark;
 }
@@ -80,7 +82,7 @@
   --ink: #0E171C; --ink-2: #4C5F6A; --ink-3: #7C8E99;
   --copper: #B4703C; --steel: #4A7291; --verdigris: #3F7A66; --magnet: #6C6091;
   --ok: #3E8C61; --warn: #A97D14; --crit: #B23E2A;
-  --lam: #C6D2D9; --lam-tooth: #D6E0E6; --rotor: #A9B8C1; --shaft: #94A5AE;
+  --lam: #C6D2D9; --lam-tooth: #D6E0E6; --rotor: #A9B8C1; --shaft: #94A5AE; --cage: #9FA8AC;
   --air: #EDF1F3;
   color-scheme: light;
 }
@@ -146,6 +148,50 @@ body {
 }
 .chip[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
 .chip:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--copper); outline-offset: 2px; }
+
+/* --- Makine tipi seçimi --- */
+.types { display: flex; gap: 4px; margin-left: auto; }
+
+/* --- 3B tuval ve denetimleri --- */
+#gl {
+  display: block; width: 100%; aspect-ratio: 1 / 1;
+  touch-action: none; cursor: grab;
+}
+#gl:active { cursor: grabbing; }
+#gl[hidden] { display: none; }
+
+.d3panel {
+  border: 1px solid var(--line); border-top: none;
+  background: var(--surface); padding: 8px;
+  display: grid; gap: 8px;
+}
+.d3panel[hidden] { display: none; }
+.d3row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.d3row label {
+  display: flex; align-items: center; gap: 7px; flex: 1 1 130px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.d3row input[type="range"] { flex: 1; min-width: 70px; accent-color: var(--copper); height: 20px; }
+.chips { display: flex; gap: 4px; flex-wrap: wrap; }
+
+/* --- Moment/devir grafiği --- */
+.chart { width: 100%; height: auto; display: block; }
+.chart .grid { stroke: var(--line-soft); stroke-width: 0.6; }
+.chart .tick { font-family: var(--mono); font-size: 7px; fill: var(--ink-3); }
+.chart .curve { fill: none; stroke: var(--copper); stroke-width: 1.8; stroke-linejoin: round; }
+.chart .pointlbl { font-family: var(--mono); font-size: 7px; fill: var(--ink-2); }
+.chart .pt-op { fill: var(--copper); }
+.chart .pt-peak { fill: var(--steel); }
+.chart .pt-start { fill: var(--verdigris); }
+
+/* --- Etiket sapması --- */
+.row .v b { font-weight: 700; margin-left: 6px; font-size: 11px; }
+.row .v b[data-l="ok"] { color: var(--ok); }
+.row .v b[data-l="warn"] { color: var(--warn); }
+.row .v b[data-l="crit"] { color: var(--crit); }
+
+.cage-bar { fill: var(--cage); stroke: var(--line); stroke-width: 0.2; }
 
 .fluxkey {
   position: absolute; right: 10px; bottom: 10px;

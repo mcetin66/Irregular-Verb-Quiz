@@ -1,0 +1,15 @@
+{
+  "name": "motor-design-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kalıcı mıknatıslı senkron motorlar için etkileşimli tasarım aracı; Pyleecan uyumlu veri modeli.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/motor.test.mjs",
+    "check": "npm test && npm run build"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  }
+}

@@ -433,8 +433,51 @@ const MATERIALS = {
     rho_elec: 2.83e-8,
     alpha: 0.0039,
   },
+
   shaft: { name: "Steel-C45", rho: 7850, rho_elec: 1.7e-7 },
   insulation: { name: "Insulation1", rho: 1400 },
+
+  /**
+   * Silisli sac kataloğu. p15 = 1,5 T / 50 Hz özgül kaybı [W/kg];
+   * khShare o kaybın histerezis payıdır (kalanı girdap akımı).
+   * Girdap payı her kalitenin kendi kalınlığına aittir, ayrıca ölçeklenmez.
+   *
+   * NOT: Temsilî katalog değerleridir. 400 Hz'i 50 Hz verisinden çıkarmak
+   * hata kaynağıdır; tedarikçinin 400 Hz eğrisiyle doğrulanmalıdır.
+   */
+  laminations: {
+    "M400-50A": { t: 0.50, p15: 4.00, khShare: 0.70, rho: 7700, Bsat: 2.00, Kf: 0.97 },
+    "M330-35A": { t: 0.35, p15: 3.30, khShare: 0.68, rho: 7650, Bsat: 2.00, Kf: 0.95 },
+    "M270-35A": { t: 0.35, p15: 2.70, khShare: 0.68, rho: 7650, Bsat: 2.00, Kf: 0.95 },
+    "M235-35A": { t: 0.35, p15: 2.35, khShare: 0.66, rho: 7600, Bsat: 1.98, Kf: 0.95 },
+    "NO20 · 0,20": { t: 0.20, p15: 2.10, khShare: 0.75, rho: 7600, Bsat: 1.95, Kf: 0.92 },
+    "NO10 · 0,10": { t: 0.10, p15: 1.90, khShare: 0.82, rho: 7600, Bsat: 1.95, Kf: 0.88 },
+    "CoFe · 0,20": { t: 0.20, p15: 2.20, khShare: 0.72, rho: 8120, Bsat: 2.35, Kf: 0.92 },
+  },
+};
+
+/**
+ * Rotor kafes malzemeleri. rho20 [Ω·m] 20 °C'de.
+ * Döküm alüminyum, gözeneklilik ve alaşım nedeniyle saf alüminyumdan
+ * belirgin biçimde dirençlidir; bu tasarımın en çok gözden kaçan kalemidir.
+ */
+const CAGE_MATERIALS = {
+  "Alüminyum döküm": {
+    rho20: 4.00e-8, alpha: 0.0039, dens: 2700, cast: true, joint: 1.0,
+    note: "Basınçlı döküm. Ucuz, seri üretime uygun, halkalar tek parça. Gözeneklilik direnci ~%25 artırır.",
+  },
+  "Alüminyum çubuk": {
+    rho20: 2.90e-8, alpha: 0.0039, dens: 2700, cast: false, joint: 1.05,
+    note: "Haddelenmiş çubuk + kaynaklı halka. Dökümden iletken, ama bağlantı direnci ve işçilik ekler.",
+  },
+  "Bakır döküm": {
+    rho20: 2.00e-8, alpha: 0.00393, dens: 8900, cast: true, joint: 1.0,
+    note: "1085 °C döküm — kalıp ömrü kısa, ekipman özel. En düşük kayıp, en yüksek üretim maliyeti.",
+  },
+  "Bakır çubuk": {
+    rho20: 1.75e-8, alpha: 0.00393, dens: 8900, cast: false, joint: 1.05,
+    note: "Çubuk çakma + sert lehim/kaynak halka. En iyi iletkenlik; bağlantı kalitesi kritik, gevşek bağlantı noktasal ısınma yapar.",
+  },
 };
 
 /* ------------------------------------------------------------------ *
@@ -492,6 +535,17 @@ function defaultDesign() {
     Rr: 3.65, Xlr: 5.26,
     Xm: 0,     // 0 ise geometriden hesaplanır
     Pfw: 60,   // sürtünme + rüzgâr kaybı [W]
+
+    // --- Üretim seçimleri ---
+    lamGrade: "M400-50A",        // silisli sac kalitesi/kalınlığı
+    cageMat: "Alüminyum döküm",  // kafes malzemesi ve üretim biçimi
+    Lscr: 5.6,                   // kısa devre halkası eksenel genişliği [mm]
+    rotorClosed: false,          // kapalı rotor oluğu (döküm için tipik)
+    bridge: 0.4,                 // kapalı olukta köprü kalınlığı [mm]
+    skew: 1.0,                   // rotor eğimi [rotor oluk adımı]
+    RrMode: "manual",            // "manual" (doküman) | "geometri"
+    skinEffect: true,            // derin çubuk / deri etkisi
+    Trot: 120,                   // rotor sıcaklığı [°C]
 
     speed: 5600,   // çalışma devri [d/dk]
     Twind: 100,
@@ -774,6 +828,138 @@ function cageGeometry(d) {
   return { Rr, rb0, rb1, Rsh, hyr, tau_r, A_bar, W3r };
 }
 
+/* ------------------------------------------------------------------ *
+ * Üretim seçimleri: sac, kafes, oluk kombinasyonu
+ * ------------------------------------------------------------------ */
+
+const lamOf = (d) =>
+  MATERIALS.laminations[d.lamGrade] ?? MATERIALS.laminations["M400-50A"];
+const cageOf = (d) =>
+  CAGE_MATERIALS[d.cageMat] ?? CAGE_MATERIALS["Alüminyum döküm"];
+
+/**
+ * Sac paketi: kaç lamina gerekiyor.
+ * Aktif paket boyu L1, istifleme faktörü Kf1 ile net demir demektir;
+ * lamina sayısı bu net demirin sac kalınlığına bölümüdür.
+ */
+function stack(d) {
+  const lam = lamOf(d);
+  const n = Math.round((d.L1 * d.Kf1) / lam.t);
+  return {
+    grade: d.lamGrade, thickness: lam.t, count: n,
+    Kf_typ: lam.Kf,                       // o kalınlık için tipik istifleme
+    grossLength: n * lam.t / d.Kf1,       // yalıtımla birlikte fiziksel boy
+  };
+}
+
+/**
+ * Demir kaybı — histerezis ve girdap bileşenleri ayrı.
+ *   P = kh·f·B²  +  ke·(f·B)²
+ * Girdap terimi sac kalınlığının karesiyle orantılıdır; katalog p15
+ * değeri zaten o kalınlığa ait olduğu için ayrıca ölçeklenmez.
+ */
+function ironLoss(d, B_tooth, B_yoke, m_tooth, m_yoke) {
+  const lam = lamOf(d);
+  const kh = (lam.p15 * lam.khShare) / (50 * 1.5 ** 2);
+  const ke = (lam.p15 * (1 - lam.khShare)) / (50 * 1.5) ** 2;
+  const f = d.freq ?? 50;
+  const hyst = (B) => kh * f * B * B;
+  const eddy = (B) => ke * (f * B) ** 2;
+  const Ph = hyst(B_tooth) * m_tooth + hyst(B_yoke) * m_yoke;
+  const Pe = eddy(B_tooth) * m_tooth + eddy(B_yoke) * m_yoke;
+  return { Ph, Pe, total: Ph + Pe, kh, ke, lam };
+}
+
+/**
+ * Kafes direncinin geometriden hesabı, statora indirgenmiş.
+ *   Rbe = Rçubuk + 2·Rhalka / (4 sin²(πp/Zr))
+ *   Rr' = 4·m·(kw·Nph)² / Zr · Rbe
+ */
+function cageResistance(d, w) {
+  const mm = 1e-3, mat = cageOf(d), c = cageGeometry(d);
+  const rho = mat.rho20 * (1 + mat.alpha * (d.Trot - 20));
+
+  const Abar = c.A_bar * mm * mm;
+  const Rbar = (rho * d.L1 * mm) / Math.max(1e-12, Abar);
+
+  const Der = (c.rb0 + c.rb1) * mm;              // ortalama halka çapı
+  const Aer = d.Hbar * d.Lscr * mm * mm;         // halka kesiti
+  const Rer = (rho * Math.PI * Der) / Math.max(1e-12, d.Zr * Aer);
+
+  const s2 = Math.sin((Math.PI * d.p) / d.Zr) ** 2;
+  const Rbe = Rbar + (2 * Rer) / Math.max(1e-9, 4 * s2);
+  const Rr = ((4 * d.qs * (w.kw1 * w.Nph) ** 2) / d.Zr) * Rbe * mat.joint;
+
+  return { Rr, Rbar, Rer, Rbe, rho, mat };
+}
+
+/**
+ * Derin çubuk (deri) etkisi — Field katsayıları.
+ * Rotor frekansı s·f olduğundan kalkışta güçlü, nominal kaymada yok denecek
+ * kadar azdır. 400 Hz'de bu ayrım büyüktür: kalkış momenti artar ama
+ * nominal verim etkilenmez.
+ */
+function skinFactors(d, s) {
+  if (!d.skinEffect) return { kR: 1, kX: 1, xi: 0, delta: Infinity };
+  const mat = cageOf(d);
+  const rho = mat.rho20 * (1 + mat.alpha * (d.Trot - 20));
+  const fr = Math.abs(s) * d.freq;
+  if (fr < 1e-6) return { kR: 1, kX: 1, xi: 0, delta: Infinity };
+
+  const delta = Math.sqrt(rho / (Math.PI * fr * 4e-7 * Math.PI));  // deri kalınlığı [m]
+  const xi = (d.Hbar * 1e-3) / delta;
+  if (xi < 0.1) return { kR: 1, kX: 1, xi, delta };
+
+  const a = 2 * xi;
+  const den = Math.cosh(a) - Math.cos(a);
+  const kR = (xi * (Math.sinh(a) + Math.sin(a))) / den;
+  const kX = ((3 / a) * (Math.sinh(a) - Math.sin(a))) / den;
+  return { kR, kX: Math.min(1, kX), xi, delta };
+}
+
+/**
+ * Stator/rotor oluk sayısı kombinasyonu kuralları.
+ * Kaynak: Alger, "Induction Machines" — asalak moment ve gürültü kuralları.
+ * Eğim (skew) bu etkilerin çoğunu bastırır; bu yüzden ihlaller eğim
+ * uygulanmışsa uyarıya düşürülür.
+ */
+function slotRules(Zs, Zr, p, skew = 0) {
+  const P = 2 * p, dz = Zs - Zr, ad = Math.abs(dz);
+  const soft = skew >= 0.8;
+  const out = [];
+  const add = (ok, level, rule, why) => out.push({ ok, level, rule, why });
+
+  add(Zr !== Zs, "crit", "Zr ≠ Zs",
+    "Eşit oluk sayısı vuruntu ve kalkışta kilitlenme yapar.");
+  add(!(ad === P), "crit", `|Zs − Zr| ≠ 2p (${P})`,
+    "Sıfır hızda senkron asalak moment — motor kalkamayabilir.");
+  add(!(ad === p), "warn", `|Zs − Zr| ≠ p (${p})`,
+    "Senkron asalak moment; hız eğrisinde çukur oluşturur.");
+  add(!(ad === 1 || ad === 2), soft ? "warn" : "crit", "|Zs − Zr| ∉ {1, 2}",
+    "Tek kutup çiftli radyal kuvvet — gövde titreşimi ve gürültü.");
+  add(!(ad === P + 1 || ad === P - 1), "warn", `|Zs − Zr| ∉ {2p±1} (${P - 1}, ${P + 1})`,
+    "Manyetik gürültü kaynağı.");
+  add(!(ad === P + 2 || ad === P - 2), "warn", `|Zs − Zr| ∉ {2p±2} (${P - 2}, ${P + 2})`,
+    "Düşük mertebeli radyal kuvvet dalgası — akustik gürültü.");
+  add(Zr % P !== 0, "warn", `Zr, 2p'nin katı olmamalı (${P})`,
+    "Kafes akımlarında dengesizlik ve asalak moment.");
+  add(Zr <= 1.25 * Zs, "warn", "Zr ≤ 1,25·Zs",
+    "Aşırı çubuk sayısı kaçak reaktansı büyütür, güç faktörünü düşürür.");
+
+  const fails = out.filter((r) => !r.ok);
+  return { rules: out, fails, clean: fails.length === 0 };
+}
+
+/** Verilen Zs ve p için kurallara uyan rotor oluk sayıları. */
+function goodRotorSlots(Zs, p, skew = 0, lo = 12, hi = 90) {
+  const out = [];
+  for (let Zr = lo; Zr <= hi; Zr++) {
+    const r = slotRules(Zs, Zr, p, skew);
+    if (r.clean) out.push(Zr);
+  }
+  return out;
+}
+
 /** Oluk ağzının etkin hava aralığını büyütmesi (Carter). */
 function carter(tau, W0, g) {
   const u = W0 / (2 * g);
@@ -811,13 +997,18 @@ const phaseVoltage = (d) =>
   d.connection === "delta" ? d.Vline : d.Vline / Math.sqrt(3);
 
 /** Verilen kaymada eşdeğer devre çözümü. */
-function solveSlip(d, Xm, s) {
+function solveSlip(d, Xm, s, Rr0 = d.Rr, Xlr0 = d.Xlr) {
   const V = phaseVoltage(d);
   const ws = (TAU * d.freq) / d.p;               // senkron açısal hız [rad/s]
   const sc = Math.abs(s) < 1e-6 ? 1e-6 : s;
 
+  // Derin çubuk etkisi kaymaya bağlıdır: kalkışta direnç artar, kaçak düşer
+  const { kR, kX } = skinFactors(d, s);
+  const Rr = Rr0 * kR;
+  const Xlr = Xlr0 * kX;
+
   const Zs_ = C(d.Rs, d.Xls);
-  const Zr_ = C(d.Rr / sc, d.Xlr);
+  const Zr_ = C(Rr / sc, Xlr);
   const Zm_ = C(0, Xm);
   const Zpar = cDiv(cMul(Zm_, Zr_), cAdd(Zm_, Zr_));
   const Ztot = cAdd(Zs_, Zpar);
@@ -826,7 +1017,7 @@ function solveSlip(d, Xm, s) {
   const pf = Ztot.re / cAbs(Ztot);
   const I2 = I1 * cAbs(Zm_) / cAbs(cAdd(Zm_, Zr_));
 
-  const Pgap = 3 * I2 * I2 * (d.Rr / sc);
+  const Pgap = 3 * I2 * I2 * (Rr / sc);
   const T = Pgap / ws;                           // hava aralığı momenti
   const Pmech = Pgap * (1 - s);
   const Pcus = 3 * I1 * I1 * d.Rs;
@@ -835,7 +1026,7 @@ function solveSlip(d, Xm, s) {
 
   const num = (x) => (Number.isFinite(x) ? x : 0);
   return {
-    V, ws, Ztot,
+    V, ws, Ztot, kR, kX, Rr_eff: Rr, Xlr_eff: Xlr,
     I1: num(I1), I2: num(I2), pf: num(pf), Pgap: num(Pgap), T: num(T),
     Pmech: num(Pmech), Pcus: num(Pcus), Pcur: num(Pcur), Pin: num(Pin),
   };
@@ -848,29 +1039,38 @@ function analyseSCIM(d) {
   const M = MATERIALS;
   const mm = 1e-3;
 
-  // Etkin hava aralığı: stator + rotor oluk ağızları
+  // Etkin hava aralığı: stator + rotor oluk ağızları.
+  // Kapalı rotor oluğunda ağız yoktur, rotor Carter katsayısı 1'e iner.
   const kc_s = carter(g.tau_s, d.W0, d.gap);
-  const kc_r = carter(c.tau_r, d.W0r, d.gap);
+  const kc_r = d.rotorClosed ? 1 : carter(c.tau_r, d.W0r, d.gap);
   const kc = kc_s * kc_r;
 
   const Xm = d.Xm > 0 ? d.Xm : magnetizingX(d, w, kc);
 
+  // Kafes direnci: doküman değeri ya da çubuk + halka geometrisinden
+  const cageR = cageResistance(d, w);
+  const Rr0 = d.RrMode === "geometri" ? cageR.Rr : d.Rr;
+
+  // Kapalı oluk köprüsü kaçak reaktansı büyütür. Katsayı mühendislik
+  // payıdır (yayınlarda +%20…40); FEA ile doğrulanmalıdır.
+  const closedK = d.rotorClosed ? 1.3 : 1;
+  const Xlr0 = d.Xlr * closedK;
+
   const ns = (60 * d.freq) / d.p;                // senkron devir [d/dk]
   const s = (ns - d.speed) / ns;
-  const op = solveSlip(d, Xm, s);
+  const op = solveSlip(d, Xm, s, Rr0, Xlr0);
 
-  const Pout = op.Pmech - d.Pfw;
-  const eta = op.Pin > 0 ? Math.max(0, Pout) / op.Pin : 0;
+  // eta aşağıda, demir kaybı hesaplandıktan sonra tamamlanır
 
   // --- Moment / kayma eğrisi ---
   const curve = [];
   for (let i = 0; i <= 120; i++) {
     const sv = 1 - i / 120;
-    const r = solveSlip(d, Xm, sv);
+    const r = solveSlip(d, Xm, sv, Rr0, Xlr0);
     curve.push({ s: sv, n: ns * (1 - sv), T: r.T, I: r.I1 });
   }
   const peak = curve.reduce((a, b) => (b.T > a.T ? b : a));
-  const start = solveSlip(d, Xm, 1);
+  const start = solveSlip(d, Xm, 1, Rr0, Xlr0);
 
   // --- Manyetik akı: stator empedansı düşüldükten sonraki hava aralığı EMK'si ---
   const E = Math.max(1, op.V - op.I1 * (d.Rs * op.pf + d.Xls * Math.sqrt(1 - op.pf ** 2)));
@@ -886,7 +1086,9 @@ function analyseSCIM(d) {
   const A_wire = ((Math.PI * (d.Wwire * mm) ** 2) / 4) * d.Nwppc;
   const fill = (A_wire * d.Ntcoil * d.Nlayer) / (g.A_slot * mm * mm);
   const J = op.I1 / (A_wire * 1e6);
-  const Jbar = op.I2 * (2 * w.Nph * w.kw1 * 3) / (d.Zr) / c.A_bar; // çubuk akım yoğunluğu
+  // Çubuk akımı: statordan rotora dönüşüm oranı 2·m·kw·Nph / Zr
+  const Ibar = op.I2 * (2 * d.qs * w.kw1 * w.Nph) / d.Zr;
+  const Jbar = Ibar / c.A_bar;                    // A/mm²
 
   // --- Kütleler ---
   const vol = (ro, ri) => Math.PI * (ro ** 2 - ri ** 2) * d.L1 * mm ** 3;
@@ -898,22 +1100,34 @@ function analyseSCIM(d) {
   const mass = {
     steel: (V_yoke + V_teeth + V_rot) * M.steel.rho,
     copper: V_cu * M.copper.rho,
-    cage: d.Zr * c.A_bar * mm * mm * (d.L1 * mm) * 2700, // alüminyum kafes
+    cage: d.Zr * c.A_bar * mm * mm * (d.L1 * mm) * cageOf(d).dens,
   };
   mass.total = mass.steel + mass.copper + mass.cage;
 
-  // --- Demir kaybı ---
-  const specLoss = (B) => M.steel.p15 * (B / 1.5) ** 2 * (d.freq / 50) ** 1.5;
-  const Pfe = specLoss(By) * V_yoke * M.steel.rho + specLoss(Bt) * V_teeth * M.steel.rho;
+  // --- Demir kaybı: seçilen sac kalitesinden, histerezis + girdap ayrı ---
+  const lam = lamOf(d);
+  const iron = ironLoss(d, Bt, By, V_teeth * lam.rho, V_yoke * lam.rho);
+  const Pfe = iron.total;
+  const pack = stack(d);
+
+  // Demir kaybı eşdeğer devrede ayrı bir kol olarak modellenmediğinden
+  // giriş gücüne eklenir; çıkış gücünden sürtünme + rüzgâr düşülür.
+  const Pout = op.Pmech - d.Pfw;
+  const Pin = op.Pin + Pfe;
+  const Ploss = op.Pcus + op.Pcur + Pfe + d.Pfw;
+  const eta = Pin > 0 ? Math.max(0, Pout) / Pin : 0;
 
   return {
     type: "scim", geom: g, cage: c, wind: w,
     kc, kc_s, kc_r, Xm, ns, s, ...op,
-    Pout, eta, Pfe, Pfw: d.Pfw,
+    Pout, Pin, Ploss, eta, Pfe, Pfw: d.Pfw,
     Phi, Bg, Bt, By, Btr, Byr,
-    fill, J, Jbar, A_wire, mass, curve,
+    fill, J, Jbar, Ibar, A_wire, mass, curve,
     peakT: peak.T, peakS: peak.s, peakN: peak.n,
     Tstart: start.T, Ilr: start.I1,
+    iron, pack, cageR, Rr0, Xlr0,
+    skinStart: skinFactors(d, 1), skinRated: skinFactors(d, s),
+    slots: slotRules(d.Zs, d.Zr, d.p, d.skew),
     f: d.freq,
   };
 }
@@ -1720,6 +1934,9 @@ const GROUPS_SCIM = [
       ["Wbar", "Çubuk genişliği", 0.5, 12, 0.1, "mm"],
       ["W0r", "Rotor oluk ağzı", 0.2, 6, 0.1, "mm"],
       ["H0r", "Rotor ağız yüksekliği", 0.1, 4, 0.1, "mm"],
+      ["Lscr", "Kısa devre halkası eni", 1, 20, 0.1, "mm"],
+      ["skew", "Rotor eğimi", 0, 2, 0.05, "oluk"],
+      ["Trot", "Rotor sıcaklığı", 20, 200, 5, "°C"],
       ["Drsh", "Mil çapı", 5, 120, 1, "mm"],
     ],
   },
@@ -1745,6 +1962,19 @@ const GROUPS_SCIM = [
   },
 ];
 const groupsFor = (d) => (d.type === "scim" ? GROUPS_SCIM : GROUPS_SPM);
+
+/* Üretim seçimleri: liste hâlinde seçilenler ve açık/kapalı anahtarlar */
+const CHOICES = [
+  { key: "lamGrade", label: "Silisli sac", opts: () => Object.keys(MATERIALS.laminations) },
+  { key: "cageMat", label: "Rotor kafesi", opts: () => Object.keys(CAGE_MATERIALS) },
+  { key: "RrMode", label: "Rotor direnci kaynağı",
+    opts: () => ["manual", "geometri"],
+    text: { manual: "Doküman değeri", geometri: "Geometriden hesapla" } },
+];
+const TOGGLES = [
+  ["rotorClosed", "Kapalı rotor oluğu"],
+  ["skinEffect", "Derin çubuk (deri) etkisi"],
+];
 
 /* ------------------------------------------------------------------ *
  * Biçimlendirme yardımcıları
@@ -1990,6 +2220,11 @@ document.getElementById("app").innerHTML = `
   <p class="note">Sol sütun modelin hesabı, sağ sütun dokümandaki değer.</p>
 </div></section>
 
+<section id="sec-slots" hidden><h2>Oluk kombinasyonu</h2><div class="card">
+  <div id="slotrules"></div>
+  <p class="note" id="slotsugg"></p>
+</div></section>
+
 <section id="sec-curve" hidden><h2>Moment / devir</h2><div class="card">
   <div id="curve"></div>
   <p class="note">Yatay eksen devir (d/dk), dikey eksen moment (N·m).</p>
@@ -2070,20 +2305,50 @@ function buildControls() {
     gEl.appendChild(box);
     host.appendChild(gEl);
   }
-  // bağlantı biçimi seçimi (yalnızca asenkron)
-  if (D.type === "scim") {
+  if (D.type !== "scim") return;
+
+  // --- Bağlantı biçimi ---
+  const conn = el("div", "group");
+  conn.appendChild(el("span", "lbl", "Bağlantı"));
+  const cbox = el("div", "chips");
+  for (const [k, t] of [["delta", "Üçgen"], ["wye", "Yıldız"]]) {
+    const b = el("button", "chip", t);
+    b.setAttribute("aria-pressed", String(D.connection === k));
+    b.onclick = () => { D.connection = k; save(); buildControls(); render(); };
+    cbox.appendChild(b);
+  }
+  conn.appendChild(cbox);
+  host.appendChild(conn);
+
+  // --- Üretim seçimleri ---
+  for (const ch of CHOICES) {
     const gEl = el("div", "group");
-    gEl.appendChild(el("span", "lbl", "Bağlantı"));
+    gEl.appendChild(el("span", "lbl", ch.label));
     const box = el("div", "chips");
-    for (const [k, t] of [["delta", "Üçgen"], ["wye", "Yıldız"]]) {
-      const b = el("button", "chip", t);
-      b.setAttribute("aria-pressed", String(D.connection === k));
-      b.onclick = () => { D.connection = k; save(); buildControls(); render(); };
+    for (const o of ch.opts()) {
+      const b = el("button", "chip", ch.text ? ch.text[o] : o);
+      b.setAttribute("aria-pressed", String(D[ch.key] === o));
+      b.onclick = () => { D[ch.key] = o; save(); buildControls(); render(); };
       box.appendChild(b);
     }
     gEl.appendChild(box);
     host.appendChild(gEl);
   }
+
+  const tEl = el("div", "group");
+  tEl.appendChild(el("span", "lbl", "Üretim seçenekleri"));
+  const tbox = el("div", "chips");
+  for (const [k, t] of TOGGLES) {
+    const b = el("button", "chip", t);
+    b.setAttribute("aria-pressed", String(!!D[k]));
+    b.onclick = () => { D[k] = !D[k]; save(); buildControls(); render(); };
+    tbox.appendChild(b);
+  }
+  tEl.appendChild(tbox);
+  host.appendChild(tEl);
+
+  const note = el("p", "note", CAGE_MATERIALS[D.cageMat]?.note ?? "");
+  host.appendChild(note);
 }
 const syncInputs = () => {
   for (const [k, c] of Object.entries(ctrlEls)) c.input.value = D[k];
@@ -2273,6 +2538,24 @@ function render() {
     }));
   }
 
+  // --- Oluk kombinasyonu kuralları ---
+  const slotSec = document.getElementById("sec-slots");
+  slotSec.hidden = !isSCIM;
+  if (isSCIM) {
+    document.getElementById("slotrules").replaceChildren(...r.slots.rules.map((c) => {
+      const e = el("div", "check");
+      e.dataset.l = c.ok ? "ok" : c.level;
+      e.append(el("div", "dot"), el("div", "t", c.rule),
+        el("div", "m", c.ok ? "uygun" : c.why));
+      return e;
+    }));
+    const good = goodRotorSlots(D.Zs, D.p, D.skew, 20, 72);
+    document.getElementById("slotsugg").textContent =
+      `${D.Zs} oluk / ${2 * D.p} kutup için tüm kurallardan geçen rotor çubuk sayıları: ` +
+      (good.join(", ") || "yok") +
+      `. Eğim (şu an ${D.skew.toFixed(2)} oluk adımı) gürültü kaynaklı ihlalleri bastırır.`;
+  }
+
   // --- Moment / devir eğrisi ---
   const curveSec = document.getElementById("sec-curve");
   curveSec.hidden = !isSCIM;
@@ -2312,7 +2595,21 @@ function render() {
     ["Kalkış momenti", fx(r.Tstart, 2), "N·m"],
     ["Kilitli rotor akımı", fx(r.Ilr, 2), "A"],
     ["Oluk doluluğu", fx(r.fill * 100, 1), "%"],
-    ["Akım yoğunluğu", fx(r.J, 2), "A/mm²"],
+    ["Akım yoğunluğu (sargı)", fx(r.J, 2), "A/mm²"],
+    ["Çubuk akımı", fx(r.Ibar, 0), "A"],
+    ["Akım yoğunluğu (çubuk)", fx(r.Jbar, 2), "A/mm²"],
+    ["Sac kalitesi", `${r.pack.grade} · ${r.pack.thickness} mm`, ""],
+    ["Lamina sayısı", fx(r.pack.count, 0), "adet"],
+    ["Demir kaybı — histerezis", fx(r.iron.Ph, 1), "W"],
+    ["Demir kaybı — girdap", fx(r.iron.Pe, 1), "W"],
+    ["Kafes malzemesi", D.cageMat, ""],
+    ["Rr — geometriden", fx(r.cageR.Rr, 3), "Ω"],
+    ["Rr — kullanılan", fx(r.Rr0, 3), "Ω"],
+    ["Çubuk / halka direnci", `${(r.cageR.Rbar * 1e6).toFixed(1)} / ${(r.cageR.Rer * 1e6).toFixed(2)}`, "µΩ"],
+    ["Deri kalınlığı (kalkışta)", fx(r.skinStart.delta * 1000, 2), "mm"],
+    ["Derin çubuk kR (kalkış)", fx(r.skinStart.kR, 3), ""],
+    ["Derin çubuk kR (nominal)", fx(r.skinRated.kR, 3), ""],
+    ["Toplam kayıp", fx(r.Ploss, 1), "W"],
     ["Net oluk alanı", fx(r.geom.A_slot, 2), "mm²"],
     ["Boyunduruk kalınlığı", fx(r.geom.hy, 2), "mm"],
     ["Rotor dış çapı", fx(r.cage.Rr * 2, 2), "mm"],

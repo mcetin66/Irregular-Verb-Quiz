@@ -1,6 +1,7 @@
 import {
   defaultDesign, defaultSPM, geometry, cageGeometry, winding,
   analyseAny, checksAny, toPyleecanAny, nameplate, PHASES,
+  MATERIALS, CAGE_MATERIALS, goodRotorSlots,
 } from "./motor.js";
 import { buildParts, createViewer } from "./view3d.js";
 
@@ -95,6 +96,9 @@ const GROUPS_SCIM = [
       ["Wbar", "Çubuk genişliği", 0.5, 12, 0.1, "mm"],
       ["W0r", "Rotor oluk ağzı", 0.2, 6, 0.1, "mm"],
       ["H0r", "Rotor ağız yüksekliği", 0.1, 4, 0.1, "mm"],
+      ["Lscr", "Kısa devre halkası eni", 1, 20, 0.1, "mm"],
+      ["skew", "Rotor eğimi", 0, 2, 0.05, "oluk"],
+      ["Trot", "Rotor sıcaklığı", 20, 200, 5, "°C"],
       ["Drsh", "Mil çapı", 5, 120, 1, "mm"],
     ],
   },
@@ -120,6 +124,19 @@ const GROUPS_SCIM = [
   },
 ];
 const groupsFor = (d) => (d.type === "scim" ? GROUPS_SCIM : GROUPS_SPM);
+
+/* Üretim seçimleri: liste hâlinde seçilenler ve açık/kapalı anahtarlar */
+const CHOICES = [
+  { key: "lamGrade", label: "Silisli sac", opts: () => Object.keys(MATERIALS.laminations) },
+  { key: "cageMat", label: "Rotor kafesi", opts: () => Object.keys(CAGE_MATERIALS) },
+  { key: "RrMode", label: "Rotor direnci kaynağı",
+    opts: () => ["manual", "geometri"],
+    text: { manual: "Doküman değeri", geometri: "Geometriden hesapla" } },
+];
+const TOGGLES = [
+  ["rotorClosed", "Kapalı rotor oluğu"],
+  ["skinEffect", "Derin çubuk (deri) etkisi"],
+];
 
 /* ------------------------------------------------------------------ *
  * Biçimlendirme yardımcıları
@@ -365,6 +382,11 @@ document.getElementById("app").innerHTML = `
   <p class="note">Sol sütun modelin hesabı, sağ sütun dokümandaki değer.</p>
 </div></section>
 
+<section id="sec-slots" hidden><h2>Oluk kombinasyonu</h2><div class="card">
+  <div id="slotrules"></div>
+  <p class="note" id="slotsugg"></p>
+</div></section>
+
 <section id="sec-curve" hidden><h2>Moment / devir</h2><div class="card">
   <div id="curve"></div>
   <p class="note">Yatay eksen devir (d/dk), dikey eksen moment (N·m).</p>
@@ -445,20 +467,50 @@ function buildControls() {
     gEl.appendChild(box);
     host.appendChild(gEl);
   }
-  // bağlantı biçimi seçimi (yalnızca asenkron)
-  if (D.type === "scim") {
+  if (D.type !== "scim") return;
+
+  // --- Bağlantı biçimi ---
+  const conn = el("div", "group");
+  conn.appendChild(el("span", "lbl", "Bağlantı"));
+  const cbox = el("div", "chips");
+  for (const [k, t] of [["delta", "Üçgen"], ["wye", "Yıldız"]]) {
+    const b = el("button", "chip", t);
+    b.setAttribute("aria-pressed", String(D.connection === k));
+    b.onclick = () => { D.connection = k; save(); buildControls(); render(); };
+    cbox.appendChild(b);
+  }
+  conn.appendChild(cbox);
+  host.appendChild(conn);
+
+  // --- Üretim seçimleri ---
+  for (const ch of CHOICES) {
     const gEl = el("div", "group");
-    gEl.appendChild(el("span", "lbl", "Bağlantı"));
+    gEl.appendChild(el("span", "lbl", ch.label));
     const box = el("div", "chips");
-    for (const [k, t] of [["delta", "Üçgen"], ["wye", "Yıldız"]]) {
-      const b = el("button", "chip", t);
-      b.setAttribute("aria-pressed", String(D.connection === k));
-      b.onclick = () => { D.connection = k; save(); buildControls(); render(); };
+    for (const o of ch.opts()) {
+      const b = el("button", "chip", ch.text ? ch.text[o] : o);
+      b.setAttribute("aria-pressed", String(D[ch.key] === o));
+      b.onclick = () => { D[ch.key] = o; save(); buildControls(); render(); };
       box.appendChild(b);
     }
     gEl.appendChild(box);
     host.appendChild(gEl);
   }
+
+  const tEl = el("div", "group");
+  tEl.appendChild(el("span", "lbl", "Üretim seçenekleri"));
+  const tbox = el("div", "chips");
+  for (const [k, t] of TOGGLES) {
+    const b = el("button", "chip", t);
+    b.setAttribute("aria-pressed", String(!!D[k]));
+    b.onclick = () => { D[k] = !D[k]; save(); buildControls(); render(); };
+    tbox.appendChild(b);
+  }
+  tEl.appendChild(tbox);
+  host.appendChild(tEl);
+
+  const note = el("p", "note", CAGE_MATERIALS[D.cageMat]?.note ?? "");
+  host.appendChild(note);
 }
 const syncInputs = () => {
   for (const [k, c] of Object.entries(ctrlEls)) c.input.value = D[k];
@@ -648,6 +700,24 @@ function render() {
     }));
   }
 
+  // --- Oluk kombinasyonu kuralları ---
+  const slotSec = document.getElementById("sec-slots");
+  slotSec.hidden = !isSCIM;
+  if (isSCIM) {
+    document.getElementById("slotrules").replaceChildren(...r.slots.rules.map((c) => {
+      const e = el("div", "check");
+      e.dataset.l = c.ok ? "ok" : c.level;
+      e.append(el("div", "dot"), el("div", "t", c.rule),
+        el("div", "m", c.ok ? "uygun" : c.why));
+      return e;
+    }));
+    const good = goodRotorSlots(D.Zs, D.p, D.skew, 20, 72);
+    document.getElementById("slotsugg").textContent =
+      `${D.Zs} oluk / ${2 * D.p} kutup için tüm kurallardan geçen rotor çubuk sayıları: ` +
+      (good.join(", ") || "yok") +
+      `. Eğim (şu an ${D.skew.toFixed(2)} oluk adımı) gürültü kaynaklı ihlalleri bastırır.`;
+  }
+
   // --- Moment / devir eğrisi ---
   const curveSec = document.getElementById("sec-curve");
   curveSec.hidden = !isSCIM;
@@ -687,7 +757,21 @@ function render() {
     ["Kalkış momenti", fx(r.Tstart, 2), "N·m"],
     ["Kilitli rotor akımı", fx(r.Ilr, 2), "A"],
     ["Oluk doluluğu", fx(r.fill * 100, 1), "%"],
-    ["Akım yoğunluğu", fx(r.J, 2), "A/mm²"],
+    ["Akım yoğunluğu (sargı)", fx(r.J, 2), "A/mm²"],
+    ["Çubuk akımı", fx(r.Ibar, 0), "A"],
+    ["Akım yoğunluğu (çubuk)", fx(r.Jbar, 2), "A/mm²"],
+    ["Sac kalitesi", `${r.pack.grade} · ${r.pack.thickness} mm`, ""],
+    ["Lamina sayısı", fx(r.pack.count, 0), "adet"],
+    ["Demir kaybı — histerezis", fx(r.iron.Ph, 1), "W"],
+    ["Demir kaybı — girdap", fx(r.iron.Pe, 1), "W"],
+    ["Kafes malzemesi", D.cageMat, ""],
+    ["Rr — geometriden", fx(r.cageR.Rr, 3), "Ω"],
+    ["Rr — kullanılan", fx(r.Rr0, 3), "Ω"],
+    ["Çubuk / halka direnci", `${(r.cageR.Rbar * 1e6).toFixed(1)} / ${(r.cageR.Rer * 1e6).toFixed(2)}`, "µΩ"],
+    ["Deri kalınlığı (kalkışta)", fx(r.skinStart.delta * 1000, 2), "mm"],
+    ["Derin çubuk kR (kalkış)", fx(r.skinStart.kR, 3), ""],
+    ["Derin çubuk kR (nominal)", fx(r.skinRated.kR, 3), ""],
+    ["Toplam kayıp", fx(r.Ploss, 1), "W"],
     ["Net oluk alanı", fx(r.geom.A_slot, 2), "mm²"],
     ["Boyunduruk kalınlığı", fx(r.geom.hy, 2), "mm"],
     ["Rotor dış çapı", fx(r.cage.Rr * 2, 2), "mm"],

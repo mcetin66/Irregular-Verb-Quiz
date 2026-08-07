@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   defaultDesign, defaultSPM, winding, analyse, geometry, toPyleecan, checks,
   analyseSCIM, checksSCIM, cageGeometry, nameplate, toPyleecanSCIM,
+  MATERIALS, CAGE_MATERIALS, cageResistance, skinFactors, stack,
+  slotRules, goodRotorSlots, ironLoss,
 } from "../src/motor.js";
 
 const near = (a, b, tol, what) =>
@@ -207,4 +209,109 @@ test("pyleecan export şeması", () => {
     }
   };
   walk(j);
+});
+
+/* ================================================================== *
+ * Üretim seçimleri
+ * ================================================================== */
+
+test("kafes direnci geometriden doküman değerine yakın çıkar", () => {
+  const d = defaultDesign();
+  const { Rr } = cageResistance(d, winding(d));
+  // Çubuk ölçüleri dokümanda yoktu; %20 içinde örtüşmesi modeli doğrular.
+  const dev = Math.abs(Rr - d.Rr) / d.Rr;
+  assert.ok(dev < 0.20, `geometrik Rr = ${Rr.toFixed(3)} Ω, doküman ${d.Rr} Ω (%${(dev*100).toFixed(0)})`);
+});
+
+test("kafes malzemesi direnci beklenen sırada", () => {
+  const d = defaultDesign(), w = winding(d);
+  const R = (m) => cageResistance({ ...d, cageMat: m }, w).Rr;
+  assert.ok(R("Bakır çubuk") < R("Bakır döküm"));
+  assert.ok(R("Bakır döküm") < R("Alüminyum çubuk"));
+  assert.ok(R("Alüminyum çubuk") < R("Alüminyum döküm"));
+});
+
+test("derin çubuk: kalkışta etkili, nominalde değil", () => {
+  const d = defaultDesign();
+  const start = skinFactors(d, 1);
+  const rated = skinFactors(d, 0.067);
+  assert.ok(start.kR > 1.05, `kalkışta kR = ${start.kR}`);
+  assert.ok(start.kX < 1, `kalkışta kX = ${start.kX}`);
+  assert.ok(rated.kR < 1.01, `nominalde kR = ${rated.kR}`);
+  assert.equal(skinFactors({ ...d, skinEffect: false }, 1).kR, 1);
+});
+
+test("bakır kafes verimi artırır ama kalkış momentini düşürür", () => {
+  const d = { ...defaultDesign(), RrMode: "geometri" };
+  const al = analyseSCIM({ ...d, cageMat: "Alüminyum döküm" });
+  const cu = analyseSCIM({ ...d, cageMat: "Bakır çubuk" });
+  assert.ok(cu.Rr0 < al.Rr0, "bakır daha düşük dirençli");
+  assert.ok(cu.Tstart < al.Tstart, "kalkış momenti düşer — asıl ödünleşme");
+  // Aynı kaymada bakır daha çok moment üretir
+  assert.ok(cu.T > al.T);
+});
+
+test("derin dar çubuk, bakırda kalkış momentini geri kazandırır", () => {
+  const d = { ...defaultDesign(), RrMode: "geometri", cageMat: "Bakır çubuk" };
+  const sig = analyseSCIM({ ...d, Hbar: 7.0, Wbar: 2.8, Lscr: 5.6 });
+  const derin = analyseSCIM({ ...d, Hbar: 9.0, Wbar: 2.2, Lscr: 4.4 });
+  assert.ok(derin.skinStart.kR > sig.skinStart.kR, "derin çubukta deri etkisi güçlenir");
+  assert.ok(derin.Tstart > sig.Tstart * 1.2, `kalkış ${sig.Tstart.toFixed(2)} -> ${derin.Tstart.toFixed(2)}`);
+});
+
+test("ince sac demir kaybını düşürür, lamina sayısını artırır", () => {
+  const d = defaultDesign();
+  const kalin = analyseSCIM({ ...d, lamGrade: "M400-50A" });
+  const ince = analyseSCIM({ ...d, lamGrade: "NO20 · 0,20" });
+  assert.ok(ince.Pfe < kalin.Pfe * 0.6, `${kalin.Pfe.toFixed(1)} -> ${ince.Pfe.toFixed(1)} W`);
+  assert.ok(ince.pack.count > kalin.pack.count * 2, "daha çok lamina gerekir");
+  assert.ok(ince.eta > kalin.eta, "verim demir kaybı üzerinden iyileşir");
+});
+
+test("400 Hz'de demir kaybına girdap akımı hâkim", () => {
+  const r = analyseSCIM(defaultDesign());
+  assert.ok(r.iron.Pe > r.iron.Ph * 2,
+    `girdap ${r.iron.Pe.toFixed(1)} W, histerezis ${r.iron.Ph.toFixed(1)} W`);
+});
+
+test("lamina sayısı paket boyuyla tutarlı", () => {
+  const d = { ...defaultDesign(), L1: 58, Kf1: 0.95, lamGrade: "M270-35A" };
+  const st = stack(d);
+  assert.equal(st.thickness, 0.35);
+  near(st.count, (58 * 0.95) / 0.35, 1, "lamina sayısı");
+});
+
+test("verim demir kaybını içerir", () => {
+  const d = defaultDesign();
+  const r = analyseSCIM(d);
+  near(r.Pin, r.Pgap + r.Pcus + r.Pfe, 1e-6, "giriş gücü");
+  near(r.Ploss, r.Pcus + r.Pcur + r.Pfe + d.Pfw, 1e-6, "kayıp toplamı");
+  near(r.eta, r.Pout / r.Pin, 1e-9, "verim tanımı");
+});
+
+test("oluk kombinasyonu kuralları", () => {
+  // 48/48: eşit oluk -> kritik
+  assert.ok(slotRules(48, 48, 4).fails.some((f) => f.level === "crit"));
+  // 48/40: |fark| = 2p = 8 -> kritik senkron asalak moment
+  assert.ok(slotRules(48, 40, 4).fails.some((f) => f.level === "crit"));
+  // 48/38: |fark| = 10 = 2p+2 -> gürültü uyarısı
+  const r38 = slotRules(48, 38, 4, 1.0);
+  assert.equal(r38.fails.length, 1);
+  assert.equal(r38.fails[0].level, "warn");
+  assert.ok(r38.fails[0].rule.includes("2p±2"));
+  // önerilen listede kritik ihlal olmamalı
+  const good = goodRotorSlots(48, 4, 1.0, 20, 72);
+  assert.ok(good.length > 0);
+  for (const Zr of good) assert.equal(slotRules(48, Zr, 4, 1.0).clean, true);
+  assert.ok(!good.includes(48) && !good.includes(40) && !good.includes(38));
+});
+
+test("kapalı rotor oluğu: Carter düşer, kaçak artar", () => {
+  const d = { ...defaultDesign(), RrMode: "geometri" };
+  const acik = analyseSCIM(d);
+  const kapali = analyseSCIM({ ...d, rotorClosed: true });
+  assert.ok(kapali.kc_r < acik.kc_r, "rotor Carter katsayısı 1'e iner");
+  assert.equal(kapali.kc_r, 1);
+  assert.ok(kapali.Xlr0 > acik.Xlr0, "kaçak reaktans artar");
+  assert.ok(kapali.Tstart < acik.Tstart, "kalkış momenti düşer");
 });

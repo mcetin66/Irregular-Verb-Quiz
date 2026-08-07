@@ -36,6 +36,15 @@ Veri modeli [Pyleecan](https://github.com/Eomys/pyleecan) (Apache-2.0) sınıf
 - Hava aralığı, diş, stator ve rotor boyunduruğu akı yoğunlukları
 - Doyma sınırlarına göre uyarı üretimi
 
+**Üretim seçimleri (asenkron)**
+- Silisli sac kataloğu: 0,10 / 0,20 / 0,35 / 0,50 mm ve CoFe; demir kaybı
+  histerezis ve girdap bileşenlerine ayrılır, lamina sayısı hesaplanır
+- Kafes malzemesi ve üretim biçimi: alüminyum/bakır × döküm/çubuk. Rotor
+  direnci çubuk + kısa devre halkası geometrisinden hesaplanabilir
+- Derin çubuk (deri) etkisi: kalkışta direnç artışı, nominalde etkisiz
+- Kapalı rotor oluğu seçeneği: Carter düşer, kaçak reaktans artar
+- Stator/rotor oluk kombinasyonu kural denetimi (Alger) ve uygun Zr listesi
+
 **Asenkron (SCIM)**
 - Eşdeğer devre çözümü; Xm geometriden (Carter + doyma) hesaplanır
 - Moment / devir eğrisi: kalkış, devrilme ve çalışma noktası işaretli
@@ -87,7 +96,7 @@ bağlantı biçimi yazmıyordu; eşdeğer devre parametreleri ile etiket başar�
 yalnızca **üçgen** bağlantıda (faz gerilimi 200 V) örtüşüyor. Yıldız
 varsayıldığında devrilme momenti nominal momentin altına düşüyor — fiziksel
 olarak imkânsız. Model dokümandaki dokuz bağımsız değeri %6,4 içinde
-yeniden üretiyor:
+yeniden üretiyor (kalkış değerleri derin çubuk etkisi dahil):
 
 | Büyüklük | Doküman | Model |
 |---|---|---|
@@ -96,9 +105,9 @@ yeniden üretiyor:
 | Çıkış gücü | 1500 W | 1455 |
 | Faz akımı | 4,40 A | 4,12 |
 | Güç faktörü | 0,720 | 0,739 |
-| Verim | %78,0 | %79,7 |
-| Kalkış momenti | 4,00 N·m | 3,76 |
-| Kilitli rotor akımı | 15,80 A | 15,77 |
+| Verim | %78,0 | %78,5 |
+| Kalkış momenti | 4,00 N·m | 4,26 |
+| Kilitli rotor akımı | 15,80 A | 15,55 |
 | Net oluk alanı | 17,155 mm² | 17,10 |
 
 ## Sınırlar

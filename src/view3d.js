@@ -204,18 +204,30 @@ export function buildParts(d, r, colors) {
     const c = r.cage;
     // rotor dişleri (çubuklar arası sac)
     push("rteeth", "Rotor sacı", colors.rotor, -1, (m) => {
-      const half = (rr) =>
-        Math.max(0.002, Math.PI / d.Zr -
-          Math.asin(Math.min(0.999, (rr > c.rb1 ? d.W0r / 2 : d.Wbar / 2) / rr)));
-      const lv = levelsBetween(c.rb0, c.Rr, half, 5);
+      const half = (rr) => {
+        let slotHalfW;
+        if (rr > c.rb1) {
+          // kapalı olukta ağız yok: köprü kesintisiz demir
+          slotHalfW = d.rotorClosed ? 0 : d.W0r / 2;
+        } else {
+          const t = (rr - c.rb0) / Math.max(0.1, c.rb1 - c.rb0);
+          slotHalfW = (d.Wbar / 2) * (0.55 + 0.45 * Math.sqrt(Math.max(0, t)));
+        }
+        return Math.max(0.002, Math.PI / d.Zr -
+          Math.asin(Math.min(0.999, slotHalfW / rr)));
+      };
+      const lv = levelsBetween(c.rb0, c.Rr, half, 8);
       for (let k = 0; k < d.Zr; k++)
         m.ribbon(lv, ((k + 0.5) * Math.PI * 2) / d.Zr, -hz, hz);
       m.tube(c.Rsh, c.rb0, -hz, hz);
     });
-    // kafes çubukları
+    // kafes çubukları — dibe doğru daralan, yuvarlatılmış profil
     push("bars", "Kafes çubukları", colors.cage, -1, (m) => {
-      const lv = levelsBetween(c.rb0 + 0.15, c.rb1, (rr) =>
-        Math.asin(Math.min(0.999, (d.Wbar / 2 - 0.05) / rr)), 3);
+      const lv = levelsBetween(c.rb0 + 0.1, c.rb1, (rr) => {
+        const t = (rr - c.rb0) / Math.max(0.1, c.rb1 - c.rb0);
+        const wHalf = (d.Wbar / 2) * (0.55 + 0.45 * Math.sqrt(Math.max(0, t)));
+        return Math.asin(Math.min(0.999, wHalf / rr));
+      }, 6);
       for (let k = 0; k < d.Zr; k++)
         m.ribbon(lv, (k * Math.PI * 2) / d.Zr, -hz, hz);
     });
@@ -237,11 +249,16 @@ export function buildParts(d, r, colors) {
     });
   }
 
-  // --- Mil ---
-  const shR = (isSCIM ? r.cage.Rsh : g.Rsh);
-  const stub = Math.max(10, 0.3 * d.L1);
-  push("shaft", "Mil", colors.shaft, -1, (m) =>
-    m.tube(0, shR, -hz - stub, hz + stub));
+  // --- Mil: paket içinde oturma çapı, dışarıda kademeli olarak incelir ---
+  const seatR = (isSCIM ? r.cage.Rsh : g.Rsh);
+  const extR = Math.min(seatR, (d.Dshaft ?? 26) / 2);
+  const stub = Math.max(12, 0.35 * d.L1);
+  const shoulder = 4;                       // omuz payı, paket dışında
+  push("shaft", "Mil", colors.shaft, -1, (m) => {
+    m.tube(0, seatR, -hz - shoulder, hz + shoulder);           // oturma çapı
+    m.tube(0, extR, hz + shoulder, hz + stub);                 // tahrik ucu
+    m.tube(0, extR, -hz - stub, -hz - shoulder);               // karşı uç
+  });
 
   return parts;
 }

@@ -110,6 +110,41 @@ yeniden üretiyor (kalkış değerleri derin çubuk etkisi dahil):
 | Kilitli rotor akımı | 15,80 A | 15,55 |
 | Net oluk alanı | 17,155 mm² | 17,10 |
 
+## İki hazır tasarım
+
+Arayüzün üstündeki iki düğme aynı gövdede iki tasarımı karşılaştırır.
+
+**Doküman** — elimizdeki motorun ölçüleri ve etiket değerleri (yukarıdaki tablo).
+
+**Claude Op.** — aynı gövde (Ø91 × 58 mm), aynı besleme (200 V üçgen, 400 Hz,
+8 kutup) ve aynı görev (1,5 kW / 2,6 N·m) altında kısıtlı arama ile bulunan
+tasarım. 30 000 rastgele aday + tepe tırmanma; kısıtlar `test/motor.test.mjs`
+içinde doğrulanır.
+
+| | Doküman | Claude Op. |
+|---|---|---|
+| Verim | %78,5 | **%89,4** |
+| Toplam kayıp | 398 W | **180 W** |
+| — stator bakır | 203 | 68 |
+| — rotor kafes | 108 | 29 |
+| — demir | 27 | 23 |
+| Gövde ısı yükü | 13 437 W/m² | **6 075 W/m²** |
+| Akım yoğunluğu | 17,3 A/mm² | 6,6 |
+| Kayma | %6,67 | %1,78 |
+| Kalkış momenti | 4,26 N·m | 4,05 |
+| Devrilme momenti | 5,71 N·m | 6,71 |
+
+Değişenler: delik çapı 66 → 64,4 mm, oluk derinliği 6,0 → 9,0 mm, oluk ağzı
+1,8 → 1,26 mm, bobin başına sarım 15 → 14, rotor çubuğu 38 × (7,0 × 2,8) →
+37 × (9,0 × 2,75) mm, hava aralığı 0,30 → 0,25 mm, mil oturma çapı 44 → 27 mm,
+sac M400-50A → NO20 (0,20 mm), kafes alüminyum döküm → bakır çubuk, sargı
+yuvarlak tel (%42 doluluk) → dikdörtgen tel (%62).
+
+Arama kısıtları: B diş ≤ 1,70 T · B boyunduruk ≤ 1,50 T · B rotor dişi ≤ 1,60 T ·
+kalkış momenti ≥ 4,0 N·m · devrilme payı ≥ 2,2× · J ≤ 12 A/mm² · güç faktörü
+≥ 0,70 · hava aralığı ≥ 0,25 mm · diş ≥ 1,5 mm · oluk ağzı ≥ 1,2 mm ·
+oluk kombinasyonu kurallarından geçmeli.
+
 ## Sınırlar
 
 Bu araç **analitik** bir manyetik devre modeli kullanır. Hızlı ön tasarım ve

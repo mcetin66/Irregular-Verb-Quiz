@@ -102,6 +102,13 @@ export const CAGE_MATERIALS = {
  * başarımı yalnızca ÜÇGEN bağlantıda (faz gerilimi 200 V) örtüşüyor —
  * bkz. test/motor.test.mjs içindeki etiket doğrulaması.
  * ------------------------------------------------------------------ */
+/** Optimize tasarımın geometrisi (kısıtlı arama sonucu). */
+const OPT_GEOM = {
+  Rint: 32.2, W3: 2.0, H2: 9.0, W0: 1.26, H0: 0.5, H1: 0.7, R1: 0.8,
+  Ntcoil: 14, Zr: 37, Hbar: 9.0, Wbar: 2.75, Lscr: 5.5,
+  W0r: 0.8, H0r: 0.5, gap: 0.25, Drsh: 27, speed: 5893,
+};
+
 export function defaultDesign() {
   return {
     type: "scim",
@@ -151,6 +158,11 @@ export function defaultDesign() {
     Pfw: 60,   // sürtünme + rüzgâr kaybı [W]
 
     // --- Üretim seçimleri ---
+    Ksfill: 0.417,               // oluk bakır doluluk oranı
+    windType: "yuvarlak",        // "yuvarlak" | "dikdörtgen"
+    RsMode: "manual",            // "manual" (doküman) | "geometri"
+    XMode: "manual",             // kaçak reaktanslar: doküman | geometri
+    Dshaft: 26,                  // mil uzantı çapı (paket dışında) [mm]
     lamGrade: "M400-50A",        // silisli sac kalitesi/kalınlığı
     cageMat: "Alüminyum döküm",  // kafes malzemesi ve üretim biçimi
     Lscr: 5.6,                   // kısa devre halkası eksenel genişliği [mm]
@@ -173,6 +185,49 @@ export function defaultDesign() {
       Pout: 1500, speed: 5600, T: 2.6, Tstart: 4.0,
       I: 4.4, Ilr: 15.8, eta: 0.78, pf: 0.72, nsync: 6000, Aslot: 17.155,
     },
+  };
+}
+
+/**
+ * Optimize edilmiş tasarım — aynı gövde (Ø91 × 58 mm), aynı besleme
+ * (200 V üçgen, 400 Hz, 8 kutup) ve aynı görev (1,5 kW / 2,6 N·m) altında
+ * kısıtlı arama ile bulunmuştur.
+ *
+ * Kısıtlar: Bdiş ≤ 1,70 · Bboyunduruk ≤ 1,50 · Brotor dişi ≤ 1,60 T,
+ * kalkış momenti ≥ 4,0 N·m, devrilme payı ≥ 2,2×, J ≤ 12 A/mm²,
+ * güç faktörü ≥ 0,70, hava aralığı ≥ 0,25 mm, diş ≥ 1,5 mm,
+ * oluk ağzı ≥ 1,2 mm, oluk kombinasyonu kurallarından geçmeli.
+ *
+ * Arama yöntemi ve kısıtlar: test/motor.test.mjs içinde doğrulanır.
+ */
+export function optimisedDesign() {
+  return {
+    ...defaultDesign(),
+    name: "SCIM-optimize-400Hz",
+
+    // Gövde ve besleme değişmedi
+    Rext: 45.5, L1: 58, Vline: 200, connection: "delta", freq: 400, p: 4,
+    Zs: 48, Nlayer: 2, Npcp: 1, coil_pitch: 6,
+
+    // Geometri — arama sonucu
+    ...OPT_GEOM,
+
+    // Üretim seçimleri
+    Kf1: 0.92,
+    lamGrade: "NO20 · 0,20",
+    cageMat: "Bakır çubuk",
+    windType: "dikdörtgen",
+    Ksfill: 0.62,
+    RsMode: "geometri",
+    RrMode: "geometri",
+    XMode: "geometri",
+    skinEffect: true,
+    rotorClosed: false,
+    skew: 1.0,
+    Dshaft: 24,
+
+    // Etiket karşılaştırması aynı hedeflerle yapılır
+    plate: defaultDesign().plate,
   };
 }
 
@@ -508,6 +563,46 @@ export function cageResistance(d, w) {
 }
 
 /**
+ * Stator faz direnci — oluk alanı, doluluk oranı ve bobin başı boyundan.
+ * Bobin başı uzunluğu 1,15 × bobin adımı × oluk adımı olarak alınır; bu
+ * katsayı dokümandaki Rs = 3,99 Ω değerine %1 içinde oturur.
+ */
+export function statorResistance(d, w, g) {
+  const mm = 1e-3;
+  const Acu = (d.Ksfill * g.A_slot) / (d.Ntcoil * d.Nlayer);   // tel başına [mm²]
+  const Lend = 1.15 * d.coil_pitch * g.tau_s;                  // bobin başı [mm]
+  const Lturn = 2 * (d.L1 + Lend) * mm;
+  const rho = MATERIALS.copper.rho20 * (1 + MATERIALS.copper.alpha * (d.Twind - 20));
+  const Rs = (rho * w.Nph * Lturn) / Math.max(1e-12, Acu * mm * mm);
+  return { Rs, Acu, Lend, Lturn };
+}
+
+/**
+ * Kaçak reaktanslar — oluk geçirgenliği (permeans) ve sarım sayısıyla ölçekleme.
+ * Doküman değerleri referans alınır; geometri değiştikçe
+ *   X ∝ Nph² · λ · L1
+ * bağıntısıyla ölçeklenir. λ dikdörtgen oluk yaklaşımıdır:
+ *   λ = H2/(3·W) + H1/W + H0/W0
+ */
+const REF = { Nph: 240, lam_s: 1.299, lam_r: 1.458, L1: 58 };
+
+export function leakage(d, w, g, c) {
+  const Wavg = Math.max(0.2, (g.W1 + g.W2) / 2);
+  const lam_s = d.H2 / (3 * Wavg) + d.H1 / Wavg + d.H0 / Math.max(0.2, d.W0);
+  const lam_r = d.Hbar / (3 * Math.max(0.2, d.Wbar)) + d.H0r / Math.max(0.2, d.W0r);
+  if (d.XMode !== "geometri") return { Xls: d.Xls, Xlr: d.Xlr, lam_s, lam_r };
+  const k = (w.Nph / REF.Nph) ** 2 * (d.L1 / REF.L1);
+  return {
+    Xls: d.Xls * k * (lam_s / REF.lam_s),
+    Xlr: d.Xlr * k * (lam_r / REF.lam_r),
+    lam_s, lam_r,
+  };
+}
+
+/** Sargı tipine göre ulaşılabilir doluluk tavanı. */
+export const fillCeiling = (d) => (d.windType === "dikdörtgen" ? 0.65 : 0.45);
+
+/**
  * Derin çubuk (deri) etkisi — Field katsayıları.
  * Rotor frekansı s·f olduğundan kalkışta güçlü, nominal kaymada yok denecek
  * kadar azdır. 400 Hz'de bu ayrım büyüktür: kalkış momenti artar ama
@@ -665,14 +760,19 @@ export function analyseSCIM(d) {
   const cageR = cageResistance(d, w);
   const Rr0 = d.RrMode === "geometri" ? cageR.Rr : d.Rr;
 
+  // Stator direnci: doküman değeri ya da oluk + doluluk geometrisinden
+  const statR = statorResistance(d, w, g);
+  const lk = leakage(d, w, g, c);
+  const dEff = { ...d, Xls: lk.Xls, ...(d.RsMode === "geometri" ? { Rs: statR.Rs } : {}) };
+
   // Kapalı oluk köprüsü kaçak reaktansı büyütür. Katsayı mühendislik
   // payıdır (yayınlarda +%20…40); FEA ile doğrulanmalıdır.
   const closedK = d.rotorClosed ? 1.3 : 1;
-  const Xlr0 = d.Xlr * closedK;
+  const Xlr0 = lk.Xlr * closedK;
 
   const ns = (60 * d.freq) / d.p;                // senkron devir [d/dk]
   const s = (ns - d.speed) / ns;
-  const op = solveSlip(d, Xm, s, Rr0, Xlr0);
+  const op = solveSlip(dEff, Xm, s, Rr0, Xlr0);
 
   // eta aşağıda, demir kaybı hesaplandıktan sonra tamamlanır
 
@@ -680,11 +780,11 @@ export function analyseSCIM(d) {
   const curve = [];
   for (let i = 0; i <= 120; i++) {
     const sv = 1 - i / 120;
-    const r = solveSlip(d, Xm, sv, Rr0, Xlr0);
+    const r = solveSlip(dEff, Xm, sv, Rr0, Xlr0);
     curve.push({ s: sv, n: ns * (1 - sv), T: r.T, I: r.I1 });
   }
   const peak = curve.reduce((a, b) => (b.T > a.T ? b : a));
-  const start = solveSlip(d, Xm, 1, Rr0, Xlr0);
+  const start = solveSlip(dEff, Xm, 1, Rr0, Xlr0);
 
   // --- Manyetik akı: stator empedansı düşüldükten sonraki hava aralığı EMK'si ---
   const E = Math.max(1, op.V - op.I1 * (d.Rs * op.pf + d.Xls * Math.sqrt(1 - op.pf ** 2)));
@@ -697,9 +797,12 @@ export function analyseSCIM(d) {
   const Byr = Phi / (2 * c.hyr * mm * d.L1 * mm * d.Kf1);
 
   // --- İletken / doluluk ---
-  const A_wire = ((Math.PI * (d.Wwire * mm) ** 2) / 4) * d.Nwppc;
-  const fill = (A_wire * d.Ntcoil * d.Nlayer) / (g.A_slot * mm * mm);
+  // Tel kesiti doluluk oranından türetilir: gerçek sarımda belirleyici olan
+  // oluğa ne kadar bakır sığdığıdır, tel çapı bunun sonucudur.
+  const A_wire = statR.Acu * mm * mm;                 // tel başına kesit [m²]
+  const fill = d.Ksfill;
   const J = op.I1 / (A_wire * 1e6);
+  const Wwire_eq = 2 * Math.sqrt(statR.Acu / Math.PI); // eşdeğer yuvarlak tel çapı
   // Çubuk akımı: statordan rotora dönüşüm oranı 2·m·kw·Nph / Zr
   const Ibar = op.I2 * (2 * d.qs * w.kw1 * w.Nph) / d.Zr;
   const Jbar = Ibar / c.A_bar;                    // A/mm²
@@ -709,8 +812,7 @@ export function analyseSCIM(d) {
   const V_yoke = vol(d.Rext, g.r3) * d.Kf1;
   const V_teeth = d.Zs * d.W3 * (d.H1 + d.H2) * d.L1 * mm ** 3 * d.Kf1;
   const V_rot = (vol(c.Rr, c.Rsh) - d.Zr * c.A_bar * d.L1 * mm ** 3) * d.Kf1;
-  const Lend = 1.2 * d.coil_pitch * g.tau_s * mm + 0.02;
-  const V_cu = 3 * w.Nph * d.Npcp * 2 * (d.L1 * mm + Lend) * A_wire;
+  const V_cu = 3 * w.Nph * d.Npcp * statR.Lturn * A_wire;
   const mass = {
     steel: (V_yoke + V_teeth + V_rot) * M.steel.rho,
     copper: V_cu * M.copper.rho,
@@ -739,7 +841,8 @@ export function analyseSCIM(d) {
     fill, J, Jbar, Ibar, A_wire, mass, curve,
     peakT: peak.T, peakS: peak.s, peakN: peak.n,
     Tstart: start.T, Ilr: start.I1,
-    iron, pack, cageR, Rr0, Xlr0,
+    iron, pack, cageR, Rr0, Xlr0, statR, Rs0: dEff.Rs, Wwire_eq,
+    fillMax: fillCeiling(d), leak: lk,
     skinStart: skinFactors(d, 1), skinRated: skinFactors(d, s),
     slots: slotRules(d.Zs, d.Zr, d.p, d.skew),
     f: d.freq,
@@ -779,8 +882,13 @@ export function checksSCIM(d, r) {
   if (r.By > 1.7) add("warn", "Stator boyunduruğu", `${r.By.toFixed(2)} T.`);
   if (r.Byr > 1.7) add("warn", "Rotor boyunduruğu", `${r.Byr.toFixed(2)} T.`);
 
-  if (r.fill > 0.50) add("crit", "Oluk doluluğu", `%${(r.fill * 100).toFixed(0)} — sığmaz.`);
-  else if (r.fill > 0.42) add("warn", "Oluk doluluğu", `%${(r.fill * 100).toFixed(0)} — zorlayıcı.`);
+  // Doluluk tavanı sargı tipine bağlıdır: yuvarlak tel ~%45, dikdörtgen ~%65
+  const cap = fillCeiling(d);
+  if (r.fill > cap)
+    add("crit", "Oluk doluluğu",
+      `%${(r.fill * 100).toFixed(0)} — ${d.windType} sargıda tavan %${(cap * 100).toFixed(0)}.`);
+  else if (r.fill > cap - 0.05)
+    add("warn", "Oluk doluluğu", `%${(r.fill * 100).toFixed(0)} — tavana yakın, sarımı zorlar.`);
   if (r.J > 12) add("crit", "Akım yoğunluğu", `${r.J.toFixed(1)} A/mm² — soğutma yetmez.`);
   else if (r.J > 7) add("warn", "Akım yoğunluğu", `${r.J.toFixed(1)} A/mm² — zorlanmış soğutma gerekir.`);
 

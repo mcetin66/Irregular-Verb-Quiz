@@ -371,3 +371,25 @@ button.act.ghost { background: transparent; color: var(--ink-2); border-color: v
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* Mil: paket içi oturma çapı ile tahrik ucu çapı ayrımı */
+.shaft-ext { fill: var(--ink-3); opacity: 0.35; }
+
+/* --- Hazır tasarım düğmeleri --- */
+.presets { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.preset {
+  display: grid; gap: 2px; text-align: left; cursor: pointer;
+  padding: 9px 11px; border-radius: var(--r);
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line);
+}
+.preset b {
+  font-family: var(--mono); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.preset span { font-size: 11.5px; color: var(--ink-3); line-height: 1.35; }
+.preset[aria-pressed="true"] {
+  border-color: var(--copper); box-shadow: inset 0 0 0 1px var(--copper);
+}
+.preset[aria-pressed="true"] b { color: var(--copper); }
+@media (min-width: 1000px) { .presets { grid-column: 1 / -1; } }

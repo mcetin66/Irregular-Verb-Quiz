@@ -379,6 +379,28 @@ button.act.ghost { background: transparent; color: var(--ink-2); border-color: v
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* Mil: paket içi oturma çapı ile tahrik ucu çapı ayrımı */
+.shaft-ext { fill: var(--ink-3); opacity: 0.35; }
+
+/* --- Hazır tasarım düğmeleri --- */
+.presets { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.preset {
+  display: grid; gap: 2px; text-align: left; cursor: pointer;
+  padding: 9px 11px; border-radius: var(--r);
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line);
+}
+.preset b {
+  font-family: var(--mono); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.preset span { font-size: 11.5px; color: var(--ink-3); line-height: 1.35; }
+.preset[aria-pressed="true"] {
+  border-color: var(--copper); box-shadow: inset 0 0 0 1px var(--copper);
+}
+.preset[aria-pressed="true"] b { color: var(--copper); }
+@media (min-width: 1000px) { .presets { grid-column: 1 / -1; } }
 </style>
 
 <main class="wrap" id="app"></main>
@@ -488,6 +510,13 @@ const CAGE_MATERIALS = {
  * başarımı yalnızca ÜÇGEN bağlantıda (faz gerilimi 200 V) örtüşüyor —
  * bkz. test/motor.test.mjs içindeki etiket doğrulaması.
  * ------------------------------------------------------------------ */
+/** Optimize tasarımın geometrisi (kısıtlı arama sonucu). */
+const OPT_GEOM = {
+  Rint: 32.2, W3: 2.0, H2: 9.0, W0: 1.26, H0: 0.5, H1: 0.7, R1: 0.8,
+  Ntcoil: 14, Zr: 37, Hbar: 9.0, Wbar: 2.75, Lscr: 5.5,
+  W0r: 0.8, H0r: 0.5, gap: 0.25, Drsh: 27, speed: 5893,
+};
+
 function defaultDesign() {
   return {
     type: "scim",
@@ -537,6 +566,11 @@ function defaultDesign() {
     Pfw: 60,   // sürtünme + rüzgâr kaybı [W]
 
     // --- Üretim seçimleri ---
+    Ksfill: 0.417,               // oluk bakır doluluk oranı
+    windType: "yuvarlak",        // "yuvarlak" | "dikdörtgen"
+    RsMode: "manual",            // "manual" (doküman) | "geometri"
+    XMode: "manual",             // kaçak reaktanslar: doküman | geometri
+    Dshaft: 26,                  // mil uzantı çapı (paket dışında) [mm]
     lamGrade: "M400-50A",        // silisli sac kalitesi/kalınlığı
     cageMat: "Alüminyum döküm",  // kafes malzemesi ve üretim biçimi
     Lscr: 5.6,                   // kısa devre halkası eksenel genişliği [mm]
@@ -559,6 +593,49 @@ function defaultDesign() {
       Pout: 1500, speed: 5600, T: 2.6, Tstart: 4.0,
       I: 4.4, Ilr: 15.8, eta: 0.78, pf: 0.72, nsync: 6000, Aslot: 17.155,
     },
+  };
+}
+
+/**
+ * Optimize edilmiş tasarım — aynı gövde (Ø91 × 58 mm), aynı besleme
+ * (200 V üçgen, 400 Hz, 8 kutup) ve aynı görev (1,5 kW / 2,6 N·m) altında
+ * kısıtlı arama ile bulunmuştur.
+ *
+ * Kısıtlar: Bdiş ≤ 1,70 · Bboyunduruk ≤ 1,50 · Brotor dişi ≤ 1,60 T,
+ * kalkış momenti ≥ 4,0 N·m, devrilme payı ≥ 2,2×, J ≤ 12 A/mm²,
+ * güç faktörü ≥ 0,70, hava aralığı ≥ 0,25 mm, diş ≥ 1,5 mm,
+ * oluk ağzı ≥ 1,2 mm, oluk kombinasyonu kurallarından geçmeli.
+ *
+ * Arama yöntemi ve kısıtlar: test/motor.test.mjs içinde doğrulanır.
+ */
+function optimisedDesign() {
+  return {
+    ...defaultDesign(),
+    name: "SCIM-optimize-400Hz",
+
+    // Gövde ve besleme değişmedi
+    Rext: 45.5, L1: 58, Vline: 200, connection: "delta", freq: 400, p: 4,
+    Zs: 48, Nlayer: 2, Npcp: 1, coil_pitch: 6,
+
+    // Geometri — arama sonucu
+    ...OPT_GEOM,
+
+    // Üretim seçimleri
+    Kf1: 0.92,
+    lamGrade: "NO20 · 0,20",
+    cageMat: "Bakır çubuk",
+    windType: "dikdörtgen",
+    Ksfill: 0.62,
+    RsMode: "geometri",
+    RrMode: "geometri",
+    XMode: "geometri",
+    skinEffect: true,
+    rotorClosed: false,
+    skew: 1.0,
+    Dshaft: 24,
+
+    // Etiket karşılaştırması aynı hedeflerle yapılır
+    plate: defaultDesign().plate,
   };
 }
 
@@ -894,6 +971,46 @@ function cageResistance(d, w) {
 }
 
 /**
+ * Stator faz direnci — oluk alanı, doluluk oranı ve bobin başı boyundan.
+ * Bobin başı uzunluğu 1,15 × bobin adımı × oluk adımı olarak alınır; bu
+ * katsayı dokümandaki Rs = 3,99 Ω değerine %1 içinde oturur.
+ */
+function statorResistance(d, w, g) {
+  const mm = 1e-3;
+  const Acu = (d.Ksfill * g.A_slot) / (d.Ntcoil * d.Nlayer);   // tel başına [mm²]
+  const Lend = 1.15 * d.coil_pitch * g.tau_s;                  // bobin başı [mm]
+  const Lturn = 2 * (d.L1 + Lend) * mm;
+  const rho = MATERIALS.copper.rho20 * (1 + MATERIALS.copper.alpha * (d.Twind - 20));
+  const Rs = (rho * w.Nph * Lturn) / Math.max(1e-12, Acu * mm * mm);
+  return { Rs, Acu, Lend, Lturn };
+}
+
+/**
+ * Kaçak reaktanslar — oluk geçirgenliği (permeans) ve sarım sayısıyla ölçekleme.
+ * Doküman değerleri referans alınır; geometri değiştikçe
+ *   X ∝ Nph² · λ · L1
+ * bağıntısıyla ölçeklenir. λ dikdörtgen oluk yaklaşımıdır:
+ *   λ = H2/(3·W) + H1/W + H0/W0
+ */
+const REF = { Nph: 240, lam_s: 1.299, lam_r: 1.458, L1: 58 };
+
+function leakage(d, w, g, c) {
+  const Wavg = Math.max(0.2, (g.W1 + g.W2) / 2);
+  const lam_s = d.H2 / (3 * Wavg) + d.H1 / Wavg + d.H0 / Math.max(0.2, d.W0);
+  const lam_r = d.Hbar / (3 * Math.max(0.2, d.Wbar)) + d.H0r / Math.max(0.2, d.W0r);
+  if (d.XMode !== "geometri") return { Xls: d.Xls, Xlr: d.Xlr, lam_s, lam_r };
+  const k = (w.Nph / REF.Nph) ** 2 * (d.L1 / REF.L1);
+  return {
+    Xls: d.Xls * k * (lam_s / REF.lam_s),
+    Xlr: d.Xlr * k * (lam_r / REF.lam_r),
+    lam_s, lam_r,
+  };
+}
+
+/** Sargı tipine göre ulaşılabilir doluluk tavanı. */
+const fillCeiling = (d) => (d.windType === "dikdörtgen" ? 0.65 : 0.45);
+
+/**
  * Derin çubuk (deri) etkisi — Field katsayıları.
  * Rotor frekansı s·f olduğundan kalkışta güçlü, nominal kaymada yok denecek
  * kadar azdır. 400 Hz'de bu ayrım büyüktür: kalkış momenti artar ama
@@ -1051,14 +1168,19 @@ function analyseSCIM(d) {
   const cageR = cageResistance(d, w);
   const Rr0 = d.RrMode === "geometri" ? cageR.Rr : d.Rr;
 
+  // Stator direnci: doküman değeri ya da oluk + doluluk geometrisinden
+  const statR = statorResistance(d, w, g);
+  const lk = leakage(d, w, g, c);
+  const dEff = { ...d, Xls: lk.Xls, ...(d.RsMode === "geometri" ? { Rs: statR.Rs } : {}) };
+
   // Kapalı oluk köprüsü kaçak reaktansı büyütür. Katsayı mühendislik
   // payıdır (yayınlarda +%20…40); FEA ile doğrulanmalıdır.
   const closedK = d.rotorClosed ? 1.3 : 1;
-  const Xlr0 = d.Xlr * closedK;
+  const Xlr0 = lk.Xlr * closedK;
 
   const ns = (60 * d.freq) / d.p;                // senkron devir [d/dk]
   const s = (ns - d.speed) / ns;
-  const op = solveSlip(d, Xm, s, Rr0, Xlr0);
+  const op = solveSlip(dEff, Xm, s, Rr0, Xlr0);
 
   // eta aşağıda, demir kaybı hesaplandıktan sonra tamamlanır
 
@@ -1066,11 +1188,11 @@ function analyseSCIM(d) {
   const curve = [];
   for (let i = 0; i <= 120; i++) {
     const sv = 1 - i / 120;
-    const r = solveSlip(d, Xm, sv, Rr0, Xlr0);
+    const r = solveSlip(dEff, Xm, sv, Rr0, Xlr0);
     curve.push({ s: sv, n: ns * (1 - sv), T: r.T, I: r.I1 });
   }
   const peak = curve.reduce((a, b) => (b.T > a.T ? b : a));
-  const start = solveSlip(d, Xm, 1, Rr0, Xlr0);
+  const start = solveSlip(dEff, Xm, 1, Rr0, Xlr0);
 
   // --- Manyetik akı: stator empedansı düşüldükten sonraki hava aralığı EMK'si ---
   const E = Math.max(1, op.V - op.I1 * (d.Rs * op.pf + d.Xls * Math.sqrt(1 - op.pf ** 2)));
@@ -1083,9 +1205,12 @@ function analyseSCIM(d) {
   const Byr = Phi / (2 * c.hyr * mm * d.L1 * mm * d.Kf1);
 
   // --- İletken / doluluk ---
-  const A_wire = ((Math.PI * (d.Wwire * mm) ** 2) / 4) * d.Nwppc;
-  const fill = (A_wire * d.Ntcoil * d.Nlayer) / (g.A_slot * mm * mm);
+  // Tel kesiti doluluk oranından türetilir: gerçek sarımda belirleyici olan
+  // oluğa ne kadar bakır sığdığıdır, tel çapı bunun sonucudur.
+  const A_wire = statR.Acu * mm * mm;                 // tel başına kesit [m²]
+  const fill = d.Ksfill;
   const J = op.I1 / (A_wire * 1e6);
+  const Wwire_eq = 2 * Math.sqrt(statR.Acu / Math.PI); // eşdeğer yuvarlak tel çapı
   // Çubuk akımı: statordan rotora dönüşüm oranı 2·m·kw·Nph / Zr
   const Ibar = op.I2 * (2 * d.qs * w.kw1 * w.Nph) / d.Zr;
   const Jbar = Ibar / c.A_bar;                    // A/mm²
@@ -1095,8 +1220,7 @@ function analyseSCIM(d) {
   const V_yoke = vol(d.Rext, g.r3) * d.Kf1;
   const V_teeth = d.Zs * d.W3 * (d.H1 + d.H2) * d.L1 * mm ** 3 * d.Kf1;
   const V_rot = (vol(c.Rr, c.Rsh) - d.Zr * c.A_bar * d.L1 * mm ** 3) * d.Kf1;
-  const Lend = 1.2 * d.coil_pitch * g.tau_s * mm + 0.02;
-  const V_cu = 3 * w.Nph * d.Npcp * 2 * (d.L1 * mm + Lend) * A_wire;
+  const V_cu = 3 * w.Nph * d.Npcp * statR.Lturn * A_wire;
   const mass = {
     steel: (V_yoke + V_teeth + V_rot) * M.steel.rho,
     copper: V_cu * M.copper.rho,
@@ -1125,7 +1249,8 @@ function analyseSCIM(d) {
     fill, J, Jbar, Ibar, A_wire, mass, curve,
     peakT: peak.T, peakS: peak.s, peakN: peak.n,
     Tstart: start.T, Ilr: start.I1,
-    iron, pack, cageR, Rr0, Xlr0,
+    iron, pack, cageR, Rr0, Xlr0, statR, Rs0: dEff.Rs, Wwire_eq,
+    fillMax: fillCeiling(d), leak: lk,
     skinStart: skinFactors(d, 1), skinRated: skinFactors(d, s),
     slots: slotRules(d.Zs, d.Zr, d.p, d.skew),
     f: d.freq,
@@ -1165,8 +1290,13 @@ function checksSCIM(d, r) {
   if (r.By > 1.7) add("warn", "Stator boyunduruğu", `${r.By.toFixed(2)} T.`);
   if (r.Byr > 1.7) add("warn", "Rotor boyunduruğu", `${r.Byr.toFixed(2)} T.`);
 
-  if (r.fill > 0.50) add("crit", "Oluk doluluğu", `%${(r.fill * 100).toFixed(0)} — sığmaz.`);
-  else if (r.fill > 0.42) add("warn", "Oluk doluluğu", `%${(r.fill * 100).toFixed(0)} — zorlayıcı.`);
+  // Doluluk tavanı sargı tipine bağlıdır: yuvarlak tel ~%45, dikdörtgen ~%65
+  const cap = fillCeiling(d);
+  if (r.fill > cap)
+    add("crit", "Oluk doluluğu",
+      `%${(r.fill * 100).toFixed(0)} — ${d.windType} sargıda tavan %${(cap * 100).toFixed(0)}.`);
+  else if (r.fill > cap - 0.05)
+    add("warn", "Oluk doluluğu", `%${(r.fill * 100).toFixed(0)} — tavana yakın, sarımı zorlar.`);
   if (r.J > 12) add("crit", "Akım yoğunluğu", `${r.J.toFixed(1)} A/mm² — soğutma yetmez.`);
   else if (r.J > 7) add("warn", "Akım yoğunluğu", `${r.J.toFixed(1)} A/mm² — zorlanmış soğutma gerekir.`);
 
@@ -1605,18 +1735,30 @@ function buildParts(d, r, colors) {
     const c = r.cage;
     // rotor dişleri (çubuklar arası sac)
     push("rteeth", "Rotor sacı", colors.rotor, -1, (m) => {
-      const half = (rr) =>
-        Math.max(0.002, Math.PI / d.Zr -
-          Math.asin(Math.min(0.999, (rr > c.rb1 ? d.W0r / 2 : d.Wbar / 2) / rr)));
-      const lv = levelsBetween(c.rb0, c.Rr, half, 5);
+      const half = (rr) => {
+        let slotHalfW;
+        if (rr > c.rb1) {
+          // kapalı olukta ağız yok: köprü kesintisiz demir
+          slotHalfW = d.rotorClosed ? 0 : d.W0r / 2;
+        } else {
+          const t = (rr - c.rb0) / Math.max(0.1, c.rb1 - c.rb0);
+          slotHalfW = (d.Wbar / 2) * (0.55 + 0.45 * Math.sqrt(Math.max(0, t)));
+        }
+        return Math.max(0.002, Math.PI / d.Zr -
+          Math.asin(Math.min(0.999, slotHalfW / rr)));
+      };
+      const lv = levelsBetween(c.rb0, c.Rr, half, 8);
       for (let k = 0; k < d.Zr; k++)
         m.ribbon(lv, ((k + 0.5) * Math.PI * 2) / d.Zr, -hz, hz);
       m.tube(c.Rsh, c.rb0, -hz, hz);
     });
-    // kafes çubukları
+    // kafes çubukları — dibe doğru daralan, yuvarlatılmış profil
     push("bars", "Kafes çubukları", colors.cage, -1, (m) => {
-      const lv = levelsBetween(c.rb0 + 0.15, c.rb1, (rr) =>
-        Math.asin(Math.min(0.999, (d.Wbar / 2 - 0.05) / rr)), 3);
+      const lv = levelsBetween(c.rb0 + 0.1, c.rb1, (rr) => {
+        const t = (rr - c.rb0) / Math.max(0.1, c.rb1 - c.rb0);
+        const wHalf = (d.Wbar / 2) * (0.55 + 0.45 * Math.sqrt(Math.max(0, t)));
+        return Math.asin(Math.min(0.999, wHalf / rr));
+      }, 6);
       for (let k = 0; k < d.Zr; k++)
         m.ribbon(lv, (k * Math.PI * 2) / d.Zr, -hz, hz);
     });
@@ -1638,11 +1780,16 @@ function buildParts(d, r, colors) {
     });
   }
 
-  // --- Mil ---
-  const shR = (isSCIM ? r.cage.Rsh : g.Rsh);
-  const stub = Math.max(10, 0.3 * d.L1);
-  push("shaft", "Mil", colors.shaft, -1, (m) =>
-    m.tube(0, shR, -hz - stub, hz + stub));
+  // --- Mil: paket içinde oturma çapı, dışarıda kademeli olarak incelir ---
+  const seatR = (isSCIM ? r.cage.Rsh : g.Rsh);
+  const extR = Math.min(seatR, (d.Dshaft ?? 26) / 2);
+  const stub = Math.max(12, 0.35 * d.L1);
+  const shoulder = 4;                       // omuz payı, paket dışında
+  push("shaft", "Mil", colors.shaft, -1, (m) => {
+    m.tube(0, seatR, -hz - shoulder, hz + shoulder);           // oturma çapı
+    m.tube(0, extR, hz + shoulder, hz + stub);                 // tahrik ucu
+    m.tube(0, extR, -hz - stub, -hz - shoulder);               // karşı uç
+  });
 
   return parts;
 }
@@ -1937,7 +2084,8 @@ const GROUPS_SCIM = [
       ["Lscr", "Kısa devre halkası eni", 1, 20, 0.1, "mm"],
       ["skew", "Rotor eğimi", 0, 2, 0.05, "oluk"],
       ["Trot", "Rotor sıcaklığı", 20, 200, 5, "°C"],
-      ["Drsh", "Mil çapı", 5, 120, 1, "mm"],
+      ["Drsh", "Rotor iç (mil oturma) çapı", 5, 120, 1, "mm"],
+      ["Dshaft", "Mil uzantı çapı", 5, 120, 1, "mm"],
     ],
   },
   {
@@ -2061,17 +2209,47 @@ function slotPath(d, g) {
   ].join(" ");
 }
 
-/** Rotor kafes oluğu profili. */
+/**
+ * Rotor kafes oluğu profili — döküm rotorlarda tipik olduğu gibi tabana
+ * doğru daralan ve köşeleri yuvarlatılmış. Kapalı olukta hava aralığına
+ * açılan ağız yoktur; oluk köprünün altında biter.
+ */
 function barPath(d, c) {
-  const aO = ang(c.Rr, d.W0r / 2), aO1 = ang(c.rb1, d.W0r / 2);
-  const aB = ang(c.rb1, d.Wbar / 2), aB0 = ang(c.rb0, d.Wbar * 0.35);
-  const rc = c.rb0 + d.Wbar * 0.3;
+  // çubuk yarı genişliği: tabanda dar, ağza doğru genişler
+  const wHalf = (rr) => {
+    const t = (rr - c.rb0) / Math.max(0.1, c.rb1 - c.rb0);
+    return (d.Wbar / 2) * (0.55 + 0.45 * Math.sqrt(Math.max(0, t)));
+  };
+  const rTop = d.rotorClosed ? c.Rr - Math.max(0.2, d.bridge) : c.Rr;
+  const aTop = d.rotorClosed ? ang(rTop, wHalf(c.rb1)) : ang(c.Rr, d.W0r / 2);
+  const aO1 = d.rotorClosed ? ang(c.rb1, wHalf(c.rb1)) : ang(c.rb1, d.W0r / 2);
+  const aB = ang(c.rb1, wHalf(c.rb1));
+
+  // gövdeyi birkaç seviyede örnekle (yuvarlak yan duvar)
+  const N = 5, mid = [];
+  for (let i = 1; i <= N; i++) {
+    const rr = c.rb1 - ((c.rb1 - c.rb0) * i) / (N + 1);
+    mid.push({ r: rr, a: ang(rr, wHalf(rr)) });
+  }
+  const rBot = c.rb0 + wHalf(c.rb0) * 0.8;
+  const aBot = ang(rBot, wHalf(c.rb0) * 0.6);
+
+  const right = mid.map((m) => `L ${fmtPt(pt(m.r, m.a))}`).join(" ");
+  const left = [...mid].reverse().map((m) => `L ${fmtPt(pt(m.r, -m.a))}`).join(" ");
+
   return [
-    `M ${fmtPt(pt(c.Rr, aO))}`, `L ${fmtPt(pt(c.rb1, aO1))}`, `L ${fmtPt(pt(c.rb1, aB))}`,
-    `L ${fmtPt(pt(rc, aB0))}`,
-    `A ${c.rb0} ${c.rb0} 0 0 0 ${fmtPt(pt(rc, -aB0))}`,
-    `L ${fmtPt(pt(c.rb1, -aB))}`, `L ${fmtPt(pt(c.rb1, -aO1))}`, `L ${fmtPt(pt(c.Rr, -aO))}`,
-    `A ${c.Rr} ${c.Rr} 0 0 1 ${fmtPt(pt(c.Rr, aO))}`, "Z",
+    `M ${fmtPt(pt(rTop, aTop))}`,
+    `L ${fmtPt(pt(c.rb1, aO1))}`,
+    `L ${fmtPt(pt(c.rb1, aB))}`,
+    right,
+    `L ${fmtPt(pt(rBot, aBot))}`,
+    `A ${rBot} ${rBot} 0 0 0 ${fmtPt(pt(rBot, -aBot))}`,
+    left,
+    `L ${fmtPt(pt(c.rb1, -aB))}`,
+    `L ${fmtPt(pt(c.rb1, -aO1))}`,
+    `L ${fmtPt(pt(rTop, -aTop))}`,
+    `A ${rTop} ${rTop} 0 0 1 ${fmtPt(pt(rTop, aTop))}`,
+    "Z",
   ].join(" ");
 }
 
@@ -2118,8 +2296,11 @@ function drawSection(r) {
     const bp = barPath(D, c);
     for (let k = 0; k < D.Zr; k++)
       add("path", { d: bp, class: "cage-bar", transform: `rotate(${-(360 * k) / D.Zr})` });
+    // mil: paket içindeki oturma çapı, üstünde tahrik ucu çapı
     add("circle", { r: c.Rsh, class: "shaft-f" });
-    for (const rr of [D.Rext, g.r3, D.Rint, c.Rr, c.rb0, c.Rsh])
+    const extR = Math.min(c.Rsh, (D.Dshaft ?? 26) / 2);
+    if (extR < c.Rsh - 0.3) add("circle", { r: extR, class: "shaft-ext" });
+    for (const rr of [D.Rext, g.r3, D.Rint, c.Rr, c.rb0, c.Rsh, extR])
       if (rr > 0) add("circle", { r: rr, class: "edge" });
   } else {
     add("circle", { r: g.Rr, class: "rotor-st", ...tint(flux && heat(r.Bry, 0.6, 2.0)) });
@@ -2192,6 +2373,15 @@ document.getElementById("app").innerHTML = `
   </div>
 </div>
 
+<div class="presets" role="group" aria-label="Hazır tasarımlar">
+  <button class="preset" data-preset="doc">
+    <b>Doküman</b><span>Elimizdeki motorun ölçüleri ve etiket değerleri</span>
+  </button>
+  <button class="preset" data-preset="opt">
+    <b>Claude Op.</b><span>Aynı gövde ve görevde kısıtlı arama ile optimize edilmiş</span>
+  </button>
+</div>
+
 <div class="instrument">
   <div class="stage">
     <div class="views" role="group" aria-label="Görünüm">
@@ -2259,11 +2449,21 @@ document.getElementById("app").innerHTML = `
 </div>
 `;
 
+/* --- Hazır tasarımlar --- */
+let presetKey = "doc";
+for (const b of document.querySelectorAll(".preset[data-preset]"))
+  b.addEventListener("click", () => {
+    presetKey = b.dataset.preset;
+    D = presetKey === "opt" ? optimisedDesign() : defaultDesign();
+    save(); buildControls(); render();
+  });
+
 /* --- Makine tipi --- */
 for (const b of document.querySelectorAll(".chip[data-type]"))
   b.addEventListener("click", () => {
     if (D.type === b.dataset.type) return;
     D = b.dataset.type === "spm" ? defaultSPM() : defaultDesign();
+    presetKey = "doc";
     save(); buildControls(); render();
   });
 
@@ -2467,6 +2667,9 @@ function render() {
     : `yüzey mıknatıslı senkron · ${D.Zs} oluk · ${w.poles} kutup`;
   for (const b of document.querySelectorAll(".chip[data-type]"))
     b.setAttribute("aria-pressed", String(b.dataset.type === D.type));
+  for (const b of document.querySelectorAll(".preset[data-preset]"))
+    b.setAttribute("aria-pressed",
+      String(isSCIM && b.dataset.preset === presetKey));
 
   // --- Sahne ---
   const is3d = view === "3d";

@@ -4,7 +4,7 @@ import {
   defaultDesign, defaultSPM, winding, analyse, geometry, toPyleecan, checks,
   analyseSCIM, checksSCIM, cageGeometry, nameplate, toPyleecanSCIM,
   MATERIALS, CAGE_MATERIALS, cageResistance, skinFactors, stack,
-  slotRules, goodRotorSlots, ironLoss,
+  slotRules, goodRotorSlots, ironLoss, optimisedDesign, statorResistance,
 } from "../src/motor.js";
 
 const near = (a, b, tol, what) =>
@@ -314,4 +314,67 @@ test("kapalı rotor oluğu: Carter düşer, kaçak artar", () => {
   assert.equal(kapali.kc_r, 1);
   assert.ok(kapali.Xlr0 > acik.Xlr0, "kaçak reaktans artar");
   assert.ok(kapali.Tstart < acik.Tstart, "kalkış momenti düşer");
+});
+
+/* ================================================================== *
+ * Optimize tasarım — kısıtlı aramanın sonucu
+ * ================================================================== */
+
+test("stator direnci geometriden doküman değerine oturur", () => {
+  const d = defaultDesign();
+  const { Rs } = statorResistance(d, winding(d), geometry(d));
+  const dev = Math.abs(Rs - d.Rs) / d.Rs;
+  assert.ok(dev < 0.05, `geometrik Rs = ${Rs.toFixed(3)} Ω, doküman ${d.Rs} Ω (%${(dev*100).toFixed(1)})`);
+});
+
+test("optimize tasarım aynı gövde, besleme ve görevi korur", () => {
+  const o = optimisedDesign(), d = defaultDesign();
+  for (const k of ["Rext", "L1", "Vline", "connection", "freq", "p", "qs", "Zs", "coil_pitch"])
+    assert.equal(o[k], d[k], `${k} değişmemeli`);
+});
+
+test("optimize tasarım tüm tasarım kısıtlarını sağlar", () => {
+  const o = optimisedDesign(), r = analyseSCIM(o);
+
+  assert.ok(r.Bt <= 1.70, `B diş = ${r.Bt.toFixed(2)} T`);
+  assert.ok(r.By <= 1.50, `B stator boyunduruğu = ${r.By.toFixed(2)} T`);
+  assert.ok(r.Byr <= 1.50, `B rotor boyunduruğu = ${r.Byr.toFixed(2)} T`);
+  assert.ok(r.Btr <= 1.60, `B rotor dişi = ${r.Btr.toFixed(2)} T`);
+  assert.ok(r.Tstart >= 4.0, `kalkış momenti = ${r.Tstart.toFixed(2)} N·m`);
+  assert.ok(r.peakT >= 2.2 * 2.6, `devrilme momenti = ${r.peakT.toFixed(2)} N·m`);
+  assert.ok(r.J <= 12, `sargı akım yoğunluğu = ${r.J.toFixed(1)} A/mm²`);
+  assert.ok(r.Jbar <= 8, `çubuk akım yoğunluğu = ${r.Jbar.toFixed(1)} A/mm²`);
+  assert.ok(r.pf >= 0.70, `güç faktörü = ${r.pf.toFixed(3)}`);
+  assert.ok(o.gap >= 0.25, "hava aralığı mekanik alt sınırın üstünde");
+  assert.ok(o.W3 >= 1.5 && o.W0 >= 1.2, "diş ve oluk ağzı imal edilebilir");
+  assert.ok(r.slots.clean, "oluk kombinasyonu tüm kurallardan geçer");
+  assert.ok(r.geom.hy >= 2.5 && r.cage.hyr >= 2.0, "boyunduruklar yeterli");
+
+  // kritik uyarı olmamalı
+  const crit = checksSCIM(o, r).filter((c) => c.level === "crit");
+  assert.deepEqual(crit, [], `kritik uyarı: ${crit.map((c) => c.label).join(", ")}`);
+});
+
+test("optimize tasarım aynı yükü belirgin biçimde daha verimli üretir", () => {
+  const b = analyseSCIM(defaultDesign());
+  const o = analyseSCIM(optimisedDesign());
+
+  assert.ok(o.eta > b.eta + 0.09, `verim ${(b.eta*100).toFixed(1)} -> ${(o.eta*100).toFixed(1)}`);
+  assert.ok(o.Ploss < b.Ploss * 0.55, `kayıp ${b.Ploss.toFixed(0)} -> ${o.Ploss.toFixed(0)} W`);
+  assert.ok(o.Pcus < b.Pcus * 0.45, "stator bakır kaybı yarıdan aza iner");
+  assert.ok(o.Pcur < b.Pcur * 0.45, "rotor kaybı yarıdan aza iner");
+  assert.ok(o.J < b.J * 0.5, `akım yoğunluğu ${b.J.toFixed(1)} -> ${o.J.toFixed(1)} A/mm²`);
+  // moment kaybı olmamalı: aynı devirde en az aynı moment
+  assert.ok(o.T >= 2.55, `nominal moment = ${o.T.toFixed(2)} N·m`);
+});
+
+test("doluluk tavanı sargı tipine göre denetlenir", () => {
+  const o = optimisedDesign();
+  // dikdörtgen sargıda %62 doluluk kabul edilir
+  assert.ok(!checksSCIM(o, analyseSCIM(o)).some(
+    (c) => c.level === "crit" && c.label === "Oluk doluluğu"));
+  // aynı doluluk yuvarlak telde kritik olmalı
+  const round = { ...o, windType: "yuvarlak" };
+  assert.ok(checksSCIM(round, analyseSCIM(round)).some(
+    (c) => c.level === "crit" && c.label === "Oluk doluluğu"));
 });

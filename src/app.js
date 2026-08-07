@@ -1,7 +1,7 @@
 import {
   defaultDesign, defaultSPM, geometry, cageGeometry, winding,
   analyseAny, checksAny, toPyleecanAny, nameplate, PHASES,
-  MATERIALS, CAGE_MATERIALS, goodRotorSlots,
+  MATERIALS, CAGE_MATERIALS, goodRotorSlots, optimisedDesign,
 } from "./motor.js";
 import { buildParts, createViewer } from "./view3d.js";
 
@@ -99,7 +99,8 @@ const GROUPS_SCIM = [
       ["Lscr", "Kısa devre halkası eni", 1, 20, 0.1, "mm"],
       ["skew", "Rotor eğimi", 0, 2, 0.05, "oluk"],
       ["Trot", "Rotor sıcaklığı", 20, 200, 5, "°C"],
-      ["Drsh", "Mil çapı", 5, 120, 1, "mm"],
+      ["Drsh", "Rotor iç (mil oturma) çapı", 5, 120, 1, "mm"],
+      ["Dshaft", "Mil uzantı çapı", 5, 120, 1, "mm"],
     ],
   },
   {
@@ -223,17 +224,47 @@ function slotPath(d, g) {
   ].join(" ");
 }
 
-/** Rotor kafes oluğu profili. */
+/**
+ * Rotor kafes oluğu profili — döküm rotorlarda tipik olduğu gibi tabana
+ * doğru daralan ve köşeleri yuvarlatılmış. Kapalı olukta hava aralığına
+ * açılan ağız yoktur; oluk köprünün altında biter.
+ */
 function barPath(d, c) {
-  const aO = ang(c.Rr, d.W0r / 2), aO1 = ang(c.rb1, d.W0r / 2);
-  const aB = ang(c.rb1, d.Wbar / 2), aB0 = ang(c.rb0, d.Wbar * 0.35);
-  const rc = c.rb0 + d.Wbar * 0.3;
+  // çubuk yarı genişliği: tabanda dar, ağza doğru genişler
+  const wHalf = (rr) => {
+    const t = (rr - c.rb0) / Math.max(0.1, c.rb1 - c.rb0);
+    return (d.Wbar / 2) * (0.55 + 0.45 * Math.sqrt(Math.max(0, t)));
+  };
+  const rTop = d.rotorClosed ? c.Rr - Math.max(0.2, d.bridge) : c.Rr;
+  const aTop = d.rotorClosed ? ang(rTop, wHalf(c.rb1)) : ang(c.Rr, d.W0r / 2);
+  const aO1 = d.rotorClosed ? ang(c.rb1, wHalf(c.rb1)) : ang(c.rb1, d.W0r / 2);
+  const aB = ang(c.rb1, wHalf(c.rb1));
+
+  // gövdeyi birkaç seviyede örnekle (yuvarlak yan duvar)
+  const N = 5, mid = [];
+  for (let i = 1; i <= N; i++) {
+    const rr = c.rb1 - ((c.rb1 - c.rb0) * i) / (N + 1);
+    mid.push({ r: rr, a: ang(rr, wHalf(rr)) });
+  }
+  const rBot = c.rb0 + wHalf(c.rb0) * 0.8;
+  const aBot = ang(rBot, wHalf(c.rb0) * 0.6);
+
+  const right = mid.map((m) => `L ${fmtPt(pt(m.r, m.a))}`).join(" ");
+  const left = [...mid].reverse().map((m) => `L ${fmtPt(pt(m.r, -m.a))}`).join(" ");
+
   return [
-    `M ${fmtPt(pt(c.Rr, aO))}`, `L ${fmtPt(pt(c.rb1, aO1))}`, `L ${fmtPt(pt(c.rb1, aB))}`,
-    `L ${fmtPt(pt(rc, aB0))}`,
-    `A ${c.rb0} ${c.rb0} 0 0 0 ${fmtPt(pt(rc, -aB0))}`,
-    `L ${fmtPt(pt(c.rb1, -aB))}`, `L ${fmtPt(pt(c.rb1, -aO1))}`, `L ${fmtPt(pt(c.Rr, -aO))}`,
-    `A ${c.Rr} ${c.Rr} 0 0 1 ${fmtPt(pt(c.Rr, aO))}`, "Z",
+    `M ${fmtPt(pt(rTop, aTop))}`,
+    `L ${fmtPt(pt(c.rb1, aO1))}`,
+    `L ${fmtPt(pt(c.rb1, aB))}`,
+    right,
+    `L ${fmtPt(pt(rBot, aBot))}`,
+    `A ${rBot} ${rBot} 0 0 0 ${fmtPt(pt(rBot, -aBot))}`,
+    left,
+    `L ${fmtPt(pt(c.rb1, -aB))}`,
+    `L ${fmtPt(pt(c.rb1, -aO1))}`,
+    `L ${fmtPt(pt(rTop, -aTop))}`,
+    `A ${rTop} ${rTop} 0 0 1 ${fmtPt(pt(rTop, aTop))}`,
+    "Z",
   ].join(" ");
 }
 
@@ -280,8 +311,11 @@ function drawSection(r) {
     const bp = barPath(D, c);
     for (let k = 0; k < D.Zr; k++)
       add("path", { d: bp, class: "cage-bar", transform: `rotate(${-(360 * k) / D.Zr})` });
+    // mil: paket içindeki oturma çapı, üstünde tahrik ucu çapı
     add("circle", { r: c.Rsh, class: "shaft-f" });
-    for (const rr of [D.Rext, g.r3, D.Rint, c.Rr, c.rb0, c.Rsh])
+    const extR = Math.min(c.Rsh, (D.Dshaft ?? 26) / 2);
+    if (extR < c.Rsh - 0.3) add("circle", { r: extR, class: "shaft-ext" });
+    for (const rr of [D.Rext, g.r3, D.Rint, c.Rr, c.rb0, c.Rsh, extR])
       if (rr > 0) add("circle", { r: rr, class: "edge" });
   } else {
     add("circle", { r: g.Rr, class: "rotor-st", ...tint(flux && heat(r.Bry, 0.6, 2.0)) });
@@ -354,6 +388,15 @@ document.getElementById("app").innerHTML = `
   </div>
 </div>
 
+<div class="presets" role="group" aria-label="Hazır tasarımlar">
+  <button class="preset" data-preset="doc">
+    <b>Doküman</b><span>Elimizdeki motorun ölçüleri ve etiket değerleri</span>
+  </button>
+  <button class="preset" data-preset="opt">
+    <b>Claude Op.</b><span>Aynı gövde ve görevde kısıtlı arama ile optimize edilmiş</span>
+  </button>
+</div>
+
 <div class="instrument">
   <div class="stage">
     <div class="views" role="group" aria-label="Görünüm">
@@ -421,11 +464,21 @@ document.getElementById("app").innerHTML = `
 </div>
 `;
 
+/* --- Hazır tasarımlar --- */
+let presetKey = "doc";
+for (const b of document.querySelectorAll(".preset[data-preset]"))
+  b.addEventListener("click", () => {
+    presetKey = b.dataset.preset;
+    D = presetKey === "opt" ? optimisedDesign() : defaultDesign();
+    save(); buildControls(); render();
+  });
+
 /* --- Makine tipi --- */
 for (const b of document.querySelectorAll(".chip[data-type]"))
   b.addEventListener("click", () => {
     if (D.type === b.dataset.type) return;
     D = b.dataset.type === "spm" ? defaultSPM() : defaultDesign();
+    presetKey = "doc";
     save(); buildControls(); render();
   });
 
@@ -629,6 +682,9 @@ function render() {
     : `yüzey mıknatıslı senkron · ${D.Zs} oluk · ${w.poles} kutup`;
   for (const b of document.querySelectorAll(".chip[data-type]"))
     b.setAttribute("aria-pressed", String(b.dataset.type === D.type));
+  for (const b of document.querySelectorAll(".preset[data-preset]"))
+    b.setAttribute("aria-pressed",
+      String(isSCIM && b.dataset.preset === presetKey));
 
   // --- Sahne ---
   const is3d = view === "3d";

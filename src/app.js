@@ -413,6 +413,7 @@ document.getElementById("app").innerHTML = `
       <label>Kesit<input type="range" id="cut" min="0" max="0.5" step="0.01" value="0"></label>
       <label>Ayır<input type="range" id="exp" min="0" max="1" step="0.01" value="0"></label>
     </div>
+    <div class="d3row chips" id="d3groups"></div>
     <div class="d3row chips" id="d3views"></div>
     <div class="d3row chips" id="d3parts"></div>
   </div>
@@ -617,6 +618,29 @@ function setup3d() {
     viewer.state.explode = parseFloat(e.target.value); viewer.schedule();
   });
 
+  // --- Montaj grupları: fotoğrafla karşılaştırmak için çıplak rotor ---
+  const groups = document.getElementById("d3groups");
+  const STATOR_KEYS = ["yoke", "teeth", "w0", "w1", "w2", "endw"];
+  const ROTOR_KEYS = ["rteeth", "bars", "rings", "rlam", "mag", "shaft"];
+  const GROUP_SETS = [
+    ["Tümü", []],
+    ["Rotor", STATOR_KEYS],
+    ["Stator", ROTOR_KEYS],
+  ];
+  let groupName = "Tümü";
+  for (const [t, hide] of GROUP_SETS) {
+    const b = el("button", "chip", t);
+    b.onclick = () => {
+      groupName = t;
+      viewer.state.hidden = new Set(hide);
+      for (const o of groups.children) o.setAttribute("aria-pressed", String(o.textContent === t));
+      syncPartChips();
+      viewer.schedule();
+    };
+    groups.appendChild(b);
+  }
+  groups.firstChild.setAttribute("aria-pressed", "true");
+
   const views = document.getElementById("d3views");
   const HALF = Math.PI / 2;
   const presets = [
@@ -641,6 +665,8 @@ function setup3d() {
   return true;
 }
 
+let syncPartChips = () => {};
+
 function update3d(r) {
   if (!setup3d()) {
     canvas.hidden = true;
@@ -655,17 +681,23 @@ function update3d(r) {
 
   const host = document.getElementById("d3parts");
   host.replaceChildren();
+  const chips = [];
   for (const p of partList) {
     const b = el("button", "chip", p.label);
     const on = () => !viewer.state.hidden.has(p.key);
-    b.setAttribute("aria-pressed", String(on()));
     b.onclick = () => {
       if (on()) viewer.state.hidden.add(p.key); else viewer.state.hidden.delete(p.key);
       b.setAttribute("aria-pressed", String(on()));
       viewer.schedule();
     };
+    chips.push([b, p.key]);
     host.appendChild(b);
   }
+  syncPartChips = () => {
+    for (const [b, key] of chips)
+      b.setAttribute("aria-pressed", String(!viewer.state.hidden.has(key)));
+  };
+  syncPartChips();
   viewer.schedule();
 }
 

@@ -23,6 +23,9 @@ Veri modeli [Pyleecan](https://github.com/Eomys/pyleecan) (Apache-2.0) sınıf
 - 3B görünüm harici kütüphane olmadan, doğrudan WebGL ile çizilir:
   parmakla döndürme, yakınlaştırma, **kameraya dönük kesit alma**, parçaları
   eksende **ayırma** ve tek tek gizleme/gösterme
+- Montaj grupları: **Tümü / Rotor / Stator** — çıplak rotoru fotoğrafla
+  karşılaştırmak için tek dokunuşla yalıtılabilir
+- Rotor eğimi (skew) 3B'de helisel oluk olarak çizilir
 
 **Sargı analizi**
 - Yıldız diyagramı (star of slots) ile faz dağılımı, tek/çift katman, bobin adımı

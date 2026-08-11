@@ -94,12 +94,13 @@ class MeshBuilder {
    * Şerit prizma: her seviye {r, half} (yarıçap ve yarı açı) verir.
    * Merkez açısı ac olan, z0..z1 boyunca ötelenmiş katı üretir.
    */
-  ribbon(levels, ac, z0, z1) {
+  ribbon(levels, ac, z0, z1, twist = 0) {
     const P = (r, a, z) => [r * Math.cos(a), r * Math.sin(a), z];
-    const L = levels.map((s) => P(s.r, ac + s.half, z0));
-    const R = levels.map((s) => P(s.r, ac - s.half, z0));
-    const L1 = levels.map((s) => P(s.r, ac + s.half, z1));
-    const R1 = levels.map((s) => P(s.r, ac - s.half, z1));
+    const a0 = ac - twist / 2, a1 = ac + twist / 2;
+    const L = levels.map((s) => P(s.r, a0 + s.half, z0));
+    const R = levels.map((s) => P(s.r, a0 - s.half, z0));
+    const L1 = levels.map((s) => P(s.r, a1 + s.half, z1));
+    const R1 = levels.map((s) => P(s.r, a1 - s.half, z1));
 
     for (let i = 0; i < levels.length - 1; i++) {
       // ön ve arka yüzler
@@ -200,6 +201,9 @@ export function buildParts(d, r, colors) {
   });
 
   // --- Rotor ---
+  // Eğim (skew) rotor oluklarını eksen boyunca burar; fotoğraftaki helisel
+  // görünümün kaynağı budur ve asalak momentleri bastırır.
+  const twist = ((d.skew ?? 0) * Math.PI * 2) / Math.max(1, d.Zr ?? 1);
   if (isSCIM) {
     const c = r.cage;
     // rotor dişleri (çubuklar arası sac)
@@ -218,7 +222,7 @@ export function buildParts(d, r, colors) {
       };
       const lv = levelsBetween(c.rb0, c.Rr, half, 8);
       for (let k = 0; k < d.Zr; k++)
-        m.ribbon(lv, ((k + 0.5) * Math.PI * 2) / d.Zr, -hz, hz);
+        m.ribbon(lv, ((k + 0.5) * Math.PI * 2) / d.Zr, -hz, hz, twist);
       m.tube(c.Rsh, c.rb0, -hz, hz);
     });
     // kafes çubukları — dibe doğru daralan, yuvarlatılmış profil
@@ -229,7 +233,7 @@ export function buildParts(d, r, colors) {
         return Math.asin(Math.min(0.999, wHalf / rr));
       }, 6);
       for (let k = 0; k < d.Zr; k++)
-        m.ribbon(lv, (k * Math.PI * 2) / d.Zr, -hz, hz);
+        m.ribbon(lv, (k * Math.PI * 2) / d.Zr, -hz, hz, twist);
     });
     // kısa devre halkaları
     push("rings", "Kısa devre halkaları", colors.cage, -1, (m) => {
@@ -283,6 +287,8 @@ const FS = `
 precision mediump float;
 varying vec3 vNor, vModel;
 uniform vec3 uColor;
+uniform vec3 uEye;         // kamera yönü (model uzayında)
+uniform vec3 uKey, uFill;  // ışık yönleri, kamera çerçevesinden türetilir
 uniform vec2 uCut;         // x: dilimin merkez açısı, y: yarı genişliği
 uniform float uCutOn;
 void main() {
@@ -292,15 +298,17 @@ void main() {
     delta = mod(delta + 3.14159265, 6.28318531) - 3.14159265;
     if (abs(delta) < uCut.y) discard;
   }
-  // çift taraflı aydınlatma: kesitte iç yüzeyler de doğru görünsün
+  // Çift taraflı aydınlatma. gl_FrontFacing üçgen sarım yönüne bağlıdır ve
+  // kesit alınmış katılarda güvenilmez; normali doğrudan kameraya çeviriyoruz.
   vec3 n = normalize(vNor);
-  if (!gl_FrontFacing) n = -n;
+  if (dot(n, normalize(uEye)) < 0.0) n = -n;
 
-  vec3 key  = normalize(vec3(0.45, 0.55, 0.75));
-  vec3 fill = normalize(vec3(-0.6, -0.35, 0.35));
-  float d = max(dot(n, key), 0.0) * 0.78
-          + max(dot(n, fill), 0.0) * 0.26
-          + 0.28;
+  // Işıklar kamera çerçevesine bağlıdır: model döndükçe onlar da döner,
+  // böylece hiçbir bakış açısında yüzeyler karanlıkta kalmaz.
+  float d = max(dot(n, uKey), 0.0) * 0.50
+          + max(dot(n, uFill), 0.0) * 0.18
+          + max(dot(n, normalize(uEye)), 0.0) * 0.34
+          + 0.22;
   // kenar aydınlatması, biçimi ayırmak için
   float rim = pow(1.0 - abs(n.z), 3.0) * 0.10;
   gl_FragColor = vec4(uColor * d + rim, 1.0);
@@ -337,6 +345,9 @@ export function createViewer(canvas) {
     view: gl.getUniformLocation(prog, "uView"),
     color: gl.getUniformLocation(prog, "uColor"),
     axial: gl.getUniformLocation(prog, "uAxial"),
+    eye: gl.getUniformLocation(prog, "uEye"),
+    key: gl.getUniformLocation(prog, "uKey"),
+    fill: gl.getUniformLocation(prog, "uFill"),
     cut: gl.getUniformLocation(prog, "uCut"),
     cutOn: gl.getUniformLocation(prog, "uCutOn"),
   };
@@ -384,6 +395,21 @@ export function createViewer(canvas) {
     // Kamera model uzayında nerede duruyorsa dilimi oraya çevir, böylece
     // hangi açıdan bakılırsa bakılsın kesit açık kalır.
     const ce = Math.cos(state.elev), se = Math.sin(state.elev);
+    // Kamera çerçevesi model uzayında: görüntü matrisinin satırları.
+    const ca = Math.cos(state.azim), sa = Math.sin(state.azim);
+    const right = [ca, 0, sa];
+    const up = [se * sa, ce, -se * ca];
+    const eye = [-ce * sa, se, ce * ca];
+    const mix = (a, b, c, wa, wb, wc) => {
+      const v = [a[0] * wa + b[0] * wb + c[0] * wc,
+                 a[1] * wa + b[1] * wb + c[1] * wc,
+                 a[2] * wa + b[2] * wb + c[2] * wc];
+      const L = Math.hypot(...v) || 1;
+      return new Float32Array([v[0] / L, v[1] / L, v[2] / L]);
+    };
+    gl.uniform3fv(loc.eye, new Float32Array(eye));
+    gl.uniform3fv(loc.key, mix(right, up, eye, 0.45, 0.55, 0.75));
+    gl.uniform3fv(loc.fill, mix(right, up, eye, -0.6, -0.35, 0.35));
     const camAngle = Math.atan2(se, -ce * Math.sin(state.azim));
     gl.uniform1f(loc.cutOn, state.cut > 0.001 ? 1 : 0);
     gl.uniform2f(loc.cut, camAngle, state.cut * Math.PI);

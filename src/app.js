@@ -748,7 +748,7 @@ function render() {
       const e = el("div", "row");
       e.appendChild(el("div", "n", c.n));
       const v = el("div", "v");
-      const lvl = Math.abs(c.dev) > 0.15 ? "crit" : Math.abs(c.dev) > 0.08 ? "warn" : "ok";
+      const lvl = c.ok ? "ok" : Math.abs(c.dev) > 0.15 ? "crit" : "warn";
       v.innerHTML = `${c.txt} <span>${c.u}</span> <b data-l="${lvl}">${
         (c.dev * 100 >= 0 ? "+" : "")}${(c.dev * 100).toFixed(1)}%</b>`;
       e.appendChild(v);

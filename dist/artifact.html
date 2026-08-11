@@ -507,9 +507,9 @@ const CAGE_MATERIALS = {
  * ------------------------------------------------------------------ */
 /** Optimize tasarımın geometrisi (kısıtlı arama sonucu). */
 const OPT_GEOM = {
-  Rint: 32.2, W3: 2.0, H2: 9.0, W0: 1.26, H0: 0.5, H1: 0.7, R1: 0.8,
-  Ntcoil: 14, Zr: 37, Hbar: 9.0, Wbar: 2.75, Lscr: 5.5,
-  W0r: 0.8, H0r: 0.5, gap: 0.25, Drsh: 27, speed: 5893,
+  Rint: 32.2, W3: 2.0, H2: 9.5, W0: 1.26, H0: 0.5, H1: 0.7, R1: 0.8,
+  Ntcoil: 14, Zr: 37, Hbar: 12.5, Wbar: 2.45, Lscr: 4.9,
+  W0r: 0.8, H0r: 0.5, gap: 0.25, Drsh: 22, Dshaft: 12, speed: 5911,
 };
 
 function defaultDesign() {
@@ -518,9 +518,10 @@ function defaultDesign() {
     name: "SCIM-48s38r-400Hz",
 
     // --- Stator laminasyonu ---
-    Rext: 45.5,    // 91 mm dış çap
-    Rint: 33.0,    // 66 mm delik çapı
-    L1: 58,        // aktif paket
+    // Ölçülen: stator sac paketi dış çapı 92,23 mm (dokümanda 91).
+    Rext: 46.115,
+    Rint: 33.0,    // 66 mm delik çapı — ölçülen rotorla 0,29 mm aralık verir
+    L1: 58,        // dokümandaki aktif paket (ölçülen rotor paketi 64,08 mm)
     Kf1: 0.95,
 
     // --- Stator oluğu ---
@@ -541,13 +542,20 @@ function defaultDesign() {
     Nwppc: 1,
 
     // --- Rotor: sincap kafesi ---
+    // Ölçülen rotor dış çapı 65,42 mm -> hava aralığı (66 − 65,42)/2 = 0,29 mm.
+    //
+    // Dokümandaki "rotor iç çapı 44 mm" iki türlü okunabiliyordu. Fotoğrafta
+    // mil, paket yüzünde bile rotor çapının dörtte biri kadar; dolayısıyla
+    // 44 mm mil çapı olamaz. 44 mm ÇUBUK DİBİ ÇEMBERİ olarak alındı:
+    //   çubuk derinliği = (65,42 − 44)/2 = 10,71 mm  (ağız payı düşülünce 10,21)
+    // Çubuk genişliği, dokümandaki Rr = 3,65 Ω'a oturacak şekilde çözüldü.
     Zr: 38,        // rotor çubuk sayısı
-    Hbar: 7.0,     // çubuk yüksekliği
-    Wbar: 2.8,     // çubuk genişliği
-    W0r: 0.8,      // rotor oluk ağzı
+    Hbar: 10.21,   // çubuk yüksekliği
+    Wbar: 1.74,    // çubuk genişliği
+    W0r: 0.6,      // rotor oluk ağzı (fotoğrafta yüzey neredeyse kesintisiz)
     H0r: 0.5,
-    gap: 0.30,     // hava aralığı
-    Drsh: 44,      // mil / rotor iç çapı
+    gap: 0.29,     // ölçülen
+    Drsh: 15,      // rotor sac paketi iç (mil oturma) çapı — fotoğraftan
 
     // --- Elektriksel besleme ---
     Vline: 200,          // hat gerilimi [V]
@@ -565,10 +573,10 @@ function defaultDesign() {
     windType: "yuvarlak",        // "yuvarlak" | "dikdörtgen"
     RsMode: "manual",            // "manual" (doküman) | "geometri"
     XMode: "manual",             // kaçak reaktanslar: doküman | geometri
-    Dshaft: 26,                  // mil uzantı çapı (paket dışında) [mm]
+    Dshaft: 12,                  // mil uzantı çapı (paket dışında) [mm]
     lamGrade: "M400-50A",        // silisli sac kalitesi/kalınlığı
     cageMat: "Alüminyum döküm",  // kafes malzemesi ve üretim biçimi
-    Lscr: 5.6,                   // kısa devre halkası eksenel genişliği [mm]
+    Lscr: 3.5,                   // kısa devre halkası eksenel genişliği [mm]
     rotorClosed: false,          // kapalı rotor oluğu (döküm için tipik)
     bridge: 0.4,                 // kapalı olukta köprü kalınlığı [mm]
     skew: 1.0,                   // rotor eğimi [rotor oluk adımı]
@@ -587,6 +595,8 @@ function defaultDesign() {
     plate: {
       Pout: 1500, speed: 5600, T: 2.6, Tstart: 4.0,
       I: 4.4, Ilr: 15.8, eta: 0.78, pf: 0.72, nsync: 6000, Aslot: 17.155,
+      // Ölçülen dış çap; dokümandaki 91 mm yerine
+      Dext: 92.23, Drot: 65.42,
     },
   };
 }
@@ -609,7 +619,7 @@ function optimisedDesign() {
     name: "SCIM-optimize-400Hz",
 
     // Gövde ve besleme değişmedi
-    Rext: 45.5, L1: 58, Vline: 200, connection: "delta", freq: 400, p: 4,
+    Rext: 46.115, L1: 58, Vline: 200, connection: "delta", freq: 400, p: 4,
     Zs: 48, Nlayer: 2, Npcp: 1, coil_pitch: 6,
 
     // Geometri — arama sonucu
@@ -959,10 +969,17 @@ function cageResistance(d, w) {
   const Rer = (rho * Math.PI * Der) / Math.max(1e-12, d.Zr * Aer);
 
   const s2 = Math.sin((Math.PI * d.p) / d.Zr) ** 2;
-  const Rbe = Rbar + (2 * Rer) / Math.max(1e-9, 4 * s2);
-  const Rr = ((4 * d.qs * (w.kw1 * w.Nph) ** 2) / d.Zr) * Rbe * mat.joint;
+  const Rring = (2 * Rer) / Math.max(1e-9, 4 * s2);
+  const Rbe = Rbar + Rring;
+  const K = ((4 * d.qs * (w.kw1 * w.Nph) ** 2) / d.Zr) * mat.joint;
 
-  return { Rr, Rbar, Rer, Rbe, rho, mat };
+  // Deri etkisi yalnızca oluk içindeki çubuğa uygulanır; kısa devre
+  // halkası oluk dışındadır ve akımı kesitine düzgün yayılır.
+  return {
+    Rr: K * Rbe, Rbar, Rer, Rbe, rho, mat,
+    RrBar: K * Rbar, RrRing: K * Rring,
+    barShare: Rbe > 0 ? Rbar / Rbe : 1,
+  };
 }
 
 /**
@@ -1114,9 +1131,12 @@ function solveSlip(d, Xm, s, Rr0 = d.Rr, Xlr0 = d.Xlr) {
   const ws = (TAU * d.freq) / d.p;               // senkron açısal hız [rad/s]
   const sc = Math.abs(s) < 1e-6 ? 1e-6 : s;
 
-  // Derin çubuk etkisi kaymaya bağlıdır: kalkışta direnç artar, kaçak düşer
+  // Derin çubuk etkisi kaymaya bağlıdır: kalkışta direnç artar, kaçak düşer.
+  // kR yalnızca oluktaki çubuk payına uygulanır (barShare); kısa devre
+  // halkası oluk dışında olduğu için deri etkisine girmez.
   const { kR, kX } = skinFactors(d, s);
-  const Rr = Rr0 * kR;
+  const share = d._barShare ?? 1;
+  const Rr = Rr0 * (share * kR + (1 - share));
   const Xlr = Xlr0 * kX;
 
   const Zs_ = C(d.Rs, d.Xls);
@@ -1166,7 +1186,10 @@ function analyseSCIM(d) {
   // Stator direnci: doküman değeri ya da oluk + doluluk geometrisinden
   const statR = statorResistance(d, w, g);
   const lk = leakage(d, w, g, c);
-  const dEff = { ...d, Xls: lk.Xls, ...(d.RsMode === "geometri" ? { Rs: statR.Rs } : {}) };
+  const dEff = {
+    ...d, Xls: lk.Xls, _barShare: cageR.barShare,
+    ...(d.RsMode === "geometri" ? { Rs: statR.Rs } : {}),
+  };
 
   // Kapalı oluk köprüsü kaçak reaktansı büyütür. Katsayı mühendislik
   // payıdır (yayınlarda +%20…40); FEA ile doğrulanmalıdır.
@@ -1256,10 +1279,13 @@ function analyseSCIM(d) {
 function nameplate(d, r) {
   const p = d.plate;
   if (!p) return [];
-  const cmp = (n, calc, plate, u, dec = 2) => ({
-    n, calc, plate, u,
+  // min: etiket değeri garanti edilen ALT SINIR (kalkış momenti böyledir);
+  // hesabın üstünde çıkması sapma sayılmaz.
+  const cmp = (n, calc, plate, u, dec = 2, min = false) => ({
+    n, calc, plate, u, min,
     dev: plate ? (calc - plate) / plate : 0,
-    txt: `${calc.toFixed(dec)} / ${plate.toFixed(dec)}`,
+    ok: min ? calc >= plate : Math.abs((calc - plate) / plate) < 0.08,
+    txt: `${calc.toFixed(dec)} / ${min ? "≥" : ""}${plate.toFixed(dec)}`,
   });
   return [
     cmp("Senkron devir", r.ns, p.nsync, "d/dk", 0),
@@ -1268,7 +1294,7 @@ function nameplate(d, r) {
     cmp("Faz akımı", r.I1, p.I, "A"),
     cmp("Güç faktörü", r.pf, p.pf, "", 3),
     cmp("Verim", r.eta * 100, p.eta * 100, "%", 1),
-    cmp("Kalkış momenti", r.Tstart, p.Tstart, "N·m"),
+    cmp("Kalkış momenti", r.Tstart, p.Tstart, "N·m", 2, true),
     cmp("Kilitli rotor akımı", r.Ilr, p.Ilr, "A"),
     cmp("Net oluk alanı", r.geom.A_slot, p.Aslot, "mm²", 2),
   ];
@@ -2728,7 +2754,7 @@ function render() {
       const e = el("div", "row");
       e.appendChild(el("div", "n", c.n));
       const v = el("div", "v");
-      const lvl = Math.abs(c.dev) > 0.15 ? "crit" : Math.abs(c.dev) > 0.08 ? "warn" : "ok";
+      const lvl = c.ok ? "ok" : Math.abs(c.dev) > 0.15 ? "crit" : "warn";
       v.innerHTML = `${c.txt} <span>${c.u}</span> <b data-l="${lvl}">${
         (c.dev * 100 >= 0 ? "+" : "")}${(c.dev * 100).toFixed(1)}%</b>`;
       e.appendChild(v);

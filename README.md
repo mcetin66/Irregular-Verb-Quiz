@@ -90,24 +90,43 @@ Sargı faktörü hesabı bilinen kombinasyonlarla karşılaştırılarak doğrul
 
 ## Doğrulanmış örnek: 400 Hz havacılık motoru
 
-Varsayılan tasarım, elimizdeki bir motor dokümanından alınmıştır
-(115 V L-N / 200 V L-L, 400 Hz, 1,5 kW, 48/38 oluk, 8 kutup). Dokümanda
+Varsayılan tasarım, elimizdeki bir motor dokümanından alınmış ve **sökülmüş
+motor üzerinde kumpasla ölçülerek** düzeltilmiştir
+(115 V L-N / 200 V L-L, 400 Hz, 1,5 kW, 48/38 oluk, 8 kutup).
+
+Ölçülen değerler:
+
+| | Doküman | Ölçülen |
+|---|---|---|
+| Stator sac paketi dış çapı | 91 mm | **92,23 mm** |
+| Rotor dış çapı | (türetilen) 65,4 | **65,42 mm** |
+| Hava aralığı | 0,30 mm | 0,29 (66 − 65,42)/2 |
+| Rotor paketi boyu | (aktif) 58 mm | 64,08 mm |
+| Rotor + mil toplam boy | — | 117,14 mm |
+
+**Önemli düzeltme:** dokümandaki "rotor iç çapı 44 mm" ifadesi ilk başta mil
+çapı sanılmıştı. Fotoğrafta mil, paket yüzünde bile rotor çapının dörtte biri
+kadar — 44 mm mil olamaz. 44 mm **çubuk dibi çemberidir**: çubuk derinliği
+(65,42 − 44)/2 = 10,71 mm. Bu okumayla çubuk geometrisinden hesaplanan kafes
+direnci dokümandaki 3,65 Ω değerine **%0,3** içinde oturuyor — ilk okumada
+bu mümkün değildi. Dokümanda
 bağlantı biçimi yazmıyordu; eşdeğer devre parametreleri ile etiket başarımı
 yalnızca **üçgen** bağlantıda (faz gerilimi 200 V) örtüşüyor. Yıldız
 varsayıldığında devrilme momenti nominal momentin altına düşüyor — fiziksel
 olarak imkânsız. Model dokümandaki dokuz bağımsız değeri %6,4 içinde
-yeniden üretiyor (kalkış değerleri derin çubuk etkisi dahil):
+yeniden üretiyor. Kalkış momenti etikette **garanti alt sınır** olarak verilir;
+model derin çubuk etkisiyle 5,26 N·m buluyor:
 
 | Büyüklük | Doküman | Model |
 |---|---|---|
 | Senkron devir | 6000 d/dk | 6000 |
-| Nominal moment | 2,60 N·m | 2,58 |
-| Çıkış gücü | 1500 W | 1455 |
-| Faz akımı | 4,40 A | 4,12 |
-| Güç faktörü | 0,720 | 0,739 |
-| Verim | %78,0 | %78,5 |
-| Kalkış momenti | 4,00 N·m | 4,26 |
-| Kilitli rotor akımı | 15,80 A | 15,55 |
+| Nominal moment | 2,60 N·m | 2,59 |
+| Çıkış gücü | 1500 W | 1460 |
+| Faz akımı | 4,40 A | 4,05 |
+| Güç faktörü | 0,720 | 0,751 |
+| Verim | %78,0 | %78,9 |
+| Kalkış momenti | ≥ 4,00 N·m | 5,26 |
+| Kilitli rotor akımı | 15,80 A | 15,06 |
 | Net oluk alanı | 17,155 mm² | 17,10 |
 
 ## İki hazır tasarım

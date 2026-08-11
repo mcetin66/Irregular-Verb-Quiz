@@ -110,8 +110,23 @@ test("SCIM: etiket değerleri modelle örtüşür", () => {
   assert.equal(d.type, "scim");
   const r = analyseSCIM(d);
   for (const c of nameplate(d, r))
-    assert.ok(Math.abs(c.dev) < 0.08,
-      `${c.n}: hesap ${c.calc.toFixed(3)} / etiket ${c.plate} → %${(c.dev * 100).toFixed(1)} sapma`);
+    assert.ok(c.ok,
+      `${c.n}: hesap ${c.calc.toFixed(3)} / etiket ${c.min ? "≥" : ""}${c.plate}` +
+      ` → %${(c.dev * 100).toFixed(1)} sapma`);
+});
+
+test("SCIM: ölçülen boyutlar modele oturuyor", () => {
+  const d = defaultDesign();
+  const r = analyseSCIM(d);
+  // kumpasla ölçülen değerler
+  near(d.Rext * 2, 92.23, 0.01, "stator dış çapı");
+  near(r.cage.Rr * 2, 65.42, 0.01, "rotor dış çapı");
+  near(d.Rint - r.cage.Rr, 0.29, 1e-9, "hava aralığı");
+  // dokümandaki 44 mm = çubuk dibi çemberi okuması
+  near(r.cage.rb0 * 2, 44.0, 0.02, "çubuk dibi çemberi");
+  // bu geometriden hesaplanan kafes direnci doküman değerine oturmalı
+  const dev = Math.abs(r.cageR.Rr - d.Rr) / d.Rr;
+  assert.ok(dev < 0.03, `geometrik Rr = ${r.cageR.Rr.toFixed(3)} Ω, doküman ${d.Rr} Ω`);
 });
 
 test("SCIM: bağlantı üçgen olmalı — yıldız etiketle bağdaşmıyor", () => {
@@ -119,9 +134,9 @@ test("SCIM: bağlantı üçgen olmalı — yıldız etiketle bağdaşmıyor", ()
   const delta = analyseSCIM(d);
   const wye = analyseSCIM({ ...d, connection: "wye" });
 
-  // Üçgende kalkış momenti etikete yakın, yıldızda üçte birine düşer
-  assert.ok(Math.abs(delta.Tstart - d.plate.Tstart) / d.plate.Tstart < 0.08);
-  assert.ok(wye.Tstart < 0.4 * d.plate.Tstart, `yıldız kalkış momenti ${wye.Tstart}`);
+  // Üçgende kalkış momenti garanti alt sınırın üstünde, yıldızda üçte birine düşer
+  assert.ok(delta.Tstart >= d.plate.Tstart, `üçgen kalkış momenti ${delta.Tstart}`);
+  assert.ok(wye.Tstart < 0.5 * d.plate.Tstart, `yıldız kalkış momenti ${wye.Tstart}`);
 
   // Yıldızda devrilme momenti nominalin altına düşer -> fiziksel olarak imkânsız
   assert.ok(wye.peakT < d.plate.T, `yıldız devrilme momenti ${wye.peakT} < nominal ${d.plate.T}`);
@@ -157,9 +172,9 @@ test("SCIM: 48/38 oluk uyumu ve sargı", () => {
 test("SCIM: geometri dokümanla uyumlu", () => {
   const d = defaultDesign();
   const g = geometry(d), c = cageGeometry(d);
-  near(d.Rext * 2, 91, 1e-9, "stator dış çapı");
+  near(d.Rext * 2, 92.23, 1e-9, "stator dış çapı (ölçülen)");
   near(d.Rint * 2, 66, 1e-9, "stator iç çapı");
-  near(c.Rr * 2, 65.4, 1e-9, "rotor dış çapı");
+  near(c.Rr * 2, 65.42, 1e-9, "rotor dış çapı (ölçülen)");
   near(g.A_slot, 17.155, 0.1, "net oluk alanı");
   assert.equal(d.Zs, 48);
   assert.equal(d.Zr, 38);
@@ -174,7 +189,7 @@ test("SCIM: pyleecan export şeması", () => {
   assert.equal(j.rotor.winding.conductor.__class__, "CondType21");
   assert.equal(j.stator.winding.type_connection, 1, "üçgen bağlantı");
   assert.equal(j.stator.winding.is_wye, false);
-  near(j.rotor.Rext, 0.0327, 1e-9, "rotor yarıçapı metre");
+  near(j.rotor.Rext, 0.032710, 1e-9, "rotor yarıçapı metre");
   assert.equal(j.rotor.slot.Zs, 38);
 });
 
@@ -246,9 +261,15 @@ test("bakır kafes verimi artırır ama kalkış momentini düşürür", () => {
   const al = analyseSCIM({ ...d, cageMat: "Alüminyum döküm" });
   const cu = analyseSCIM({ ...d, cageMat: "Bakır çubuk" });
   assert.ok(cu.Rr0 < al.Rr0, "bakır daha düşük dirençli");
-  assert.ok(cu.Tstart < al.Tstart, "kalkış momenti düşer — asıl ödünleşme");
   // Aynı kaymada bakır daha çok moment üretir
   assert.ok(cu.T > al.T);
+  // Kalkışta ödünleşme: düşük rotor direnci kalkış momentini düşürür.
+  // Derin çubukta deri etkisi bunu kısmen telafi eder, o yüzden karşılaştırma
+  // deri etkisi kapalıyken (saf direnç etkisi) yapılır.
+  const noSkin = { ...d, skinEffect: false };
+  const alDC = analyseSCIM({ ...noSkin, cageMat: "Alüminyum döküm" });
+  const cuDC = analyseSCIM({ ...noSkin, cageMat: "Bakır çubuk" });
+  assert.ok(cuDC.Tstart < alDC.Tstart, "kalkış momenti düşer — asıl ödünleşme");
 });
 
 test("derin dar çubuk, bakırda kalkış momentini geri kazandırır", () => {

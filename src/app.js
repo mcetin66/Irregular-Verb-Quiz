@@ -620,7 +620,7 @@ function setup3d() {
 
   // --- Montaj grupları: fotoğrafla karşılaştırmak için çıplak rotor ---
   const groups = document.getElementById("d3groups");
-  const STATOR_KEYS = ["yoke", "teeth", "w0", "w1", "w2", "endw"];
+  const STATOR_KEYS = ["yoke", "teeth", "w0", "w1", "w2"];
   const ROTOR_KEYS = ["rteeth", "bars", "rings", "rlam", "mag", "shaft"];
   const GROUP_SETS = [
     ["Tümü", []],
@@ -676,7 +676,8 @@ function update3d(r) {
   }
   partList = buildParts(D, r, colors3d());
   const extent = Math.max(D.Rext, D.L1 / 2 + Math.max(10, 0.3 * D.L1));
-  viewer.setParts(partList, extent);
+  // sac katman aralığı dokusu için (görsel; aliasing'e karşı alt sınırlı)
+  viewer.setParts(partList, extent, r.pack ? r.pack.thickness * 3 : 1);
   viewer.setBackground([0, 0, 0, 0]);
 
   const host = document.getElementById("d3parts");

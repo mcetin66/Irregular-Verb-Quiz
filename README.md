@@ -26,6 +26,11 @@ Veri modeli [Pyleecan](https://github.com/Eomys/pyleecan) (Apache-2.0) sınıf
 - Montaj grupları: **Tümü / Rotor / Stator** — çıplak rotoru fotoğrafla
   karşılaştırmak için tek dokunuşla yalıtılabilir
 - Rotor eğimi (skew) 3B'de helisel oluk olarak çizilir
+- **Gerçek bobin başları**: her bobin oluktan çıkıp adım kadar ötedeki oluğa
+  dönen bir yol boyunca süpürülür, faz rengiyle çizilir — tek parça bakır
+  halka değil
+- Sac paketi dokusu ve metalik yansıma; doku görseldir, katman sayısını
+  birebir göstermez (aliasing'e karşı aralık alt sınırlıdır)
 
 **Sargı analizi**
 - Yıldız diyagramı (star of slots) ile faz dağılımı, tek/çift katman, bobin adımı

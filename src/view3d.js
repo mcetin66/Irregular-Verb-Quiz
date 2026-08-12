@@ -116,6 +116,46 @@ class MeshBuilder {
     this.quad(R[n], L[n], L1[n], R1[n]);
   }
 
+  /**
+   * Bir 3B yol boyunca çokgen kesit süpürür — bobin başlarını çizmek için.
+   * Kesit çerçevesi her noktada teğet ve yerel yarıçap yönünden kurulur.
+   */
+  sweep(path, rad, sides = 6) {
+    if (path.length < 2) return;
+    const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    const cross = (a, b) => [a[1] * b[2] - a[2] * b[1],
+                             a[2] * b[0] - a[0] * b[2],
+                             a[0] * b[1] - a[1] * b[0]];
+    const norm = (a) => { const L = Math.hypot(...a) || 1; return [a[0]/L, a[1]/L, a[2]/L]; };
+
+    const rings = path.map((P, i) => {
+      const prev = path[Math.max(0, i - 1)], next = path[Math.min(path.length - 1, i + 1)];
+      const T = norm(sub(next, prev));
+      // referans: noktanın kendi yarıçap yönü
+      let U = norm([P[0], P[1], 0]);
+      if (!Number.isFinite(U[0])) U = [1, 0, 0];
+      let N = norm(cross(T, U));
+      if (!Number.isFinite(N[0]) || Math.hypot(...N) < 1e-6) N = norm(cross(T, [0, 0, 1]));
+      const B = norm(cross(N, T));
+      const pts = [];
+      for (let k = 0; k < sides; k++) {
+        const a = (k / sides) * Math.PI * 2;
+        const c = Math.cos(a) * rad, sn = Math.sin(a) * rad;
+        pts.push([P[0] + N[0]*c + B[0]*sn, P[1] + N[1]*c + B[1]*sn, P[2] + N[2]*c + B[2]*sn]);
+      }
+      return pts;
+    });
+
+    for (let i = 0; i < rings.length - 1; i++)
+      for (let k = 0; k < sides; k++) {
+        const k2 = (k + 1) % sides;
+        this.quad(rings[i][k], rings[i][k2], rings[i + 1][k2], rings[i + 1][k]);
+      }
+    // uç kapaklar
+    for (const ring of [rings[0], rings[rings.length - 1]])
+      for (let k = 1; k < sides - 1; k++) this.tri(ring[0], ring[k], ring[k + 1]);
+  }
+
   data() { return new Float32Array(this.v); }
   get count() { return this.v.length / 6; }
 }
@@ -157,48 +197,80 @@ export function buildParts(d, r, colors) {
   const isSCIM = d.type === "scim";
   const parts = [];
 
-  const push = (key, label, color, axial, fn) => {
+  // mat: 0 = düz, 1 = sac paketi (katman dokusu), 2 = parlak metal
+  const push = (key, label, color, axial, mat, fn) => {
     const m = new MeshBuilder();
     fn(m);
-    if (m.count) parts.push({ key, label, color, axial, data: m.data(), count: m.count });
+    if (m.count) parts.push({ key, label, color, axial, mat, data: m.data(), count: m.count });
   };
 
   // --- Stator boyunduruğu ---
-  push("yoke", "Stator boyunduruğu", colors.lam, 0, (m) =>
+  push("yoke", "Stator boyunduruğu", colors.lam, 0, 1, (m) =>
     m.tube(g.r3, d.Rext, -hz, hz));
 
   // --- Stator dişleri ---
-  push("teeth", "Stator dişleri", colors.tooth, 0, (m) => {
+  push("teeth", "Stator dişleri", colors.tooth, 0, 1, (m) => {
     const lv = levelsBetween(g.r0, g.r3, (rr) => toothHalf(d, g, rr, d.Zs), 8);
     for (let k = 0; k < d.Zs; k++)
       m.ribbon(lv, ((k + 0.5) * Math.PI * 2) / d.Zs, -hz, hz);
   });
 
-  // --- Sargılar: oluk içi iletken demetleri, faz rengiyle ---
+  // --- Sargılar: oluk bacakları ve onları birleştiren gerçek bobin başları ---
   const nLay = Math.max(1, d.Nlayer);
   const span = g.r3 - g.r2 - 0.6;
+  const layerR = (i) => {
+    const rA = g.r2 + 0.3 + (span / nLay) * i;
+    return [rA, rA + (span / nLay) * 0.86];
+  };
+  // bobin başının eksende çıktığı yükseklik ve tel demeti yarıçapı
+  const endLen = Math.max(2.5, 0.42 * d.coil_pitch * g.tau_s);
+  const bundle = Math.max(0.5, Math.min(1.4, 0.3 * g.tau_s));
+
+  /** Bir oluktan çıkıp adım kadar ötedeki oluğa dönen bobin başı yolu. */
+  const endTurn = (kA, kB, rA, rB, zSign) => {
+    const P = [];
+    const thA = (kA * Math.PI * 2) / d.Zs, thB = (kB * Math.PI * 2) / d.Zs;
+    let dth = thB - thA;
+    while (dth > Math.PI) dth -= Math.PI * 2;
+    while (dth < -Math.PI) dth += Math.PI * 2;
+    const N = 14;
+    for (let i = 0; i <= N; i++) {
+      const t = i / N;
+      const th = thA + dth * t;
+      const bump = Math.sin(Math.PI * t);              // eksende dışa çıkış
+      const rr = rA + (rB - rA) * t + bump * 0.35;     // hafif dışa taşma
+      const z = zSign * (hz + endLen * bump);
+      P.push([rr * Math.cos(th), rr * Math.sin(th), z]);
+    }
+    return P;
+  };
+
   for (let ph = 0; ph < 3; ph++) {
-    push(`w${ph}`, `Faz ${"ABC"[ph]} sargısı`, colors.phase[ph], 0, (m) => {
+    push(`w${ph}`, `Faz ${"ABC"[ph]} sargısı`, colors.phase[ph], 0, 2, (m) => {
       for (let k = 0; k < d.Zs; k++) {
-        const layers = nLay >= 2 ? [r.wind.top[k], r.wind.bot[k]] : [r.wind.top[k]];
-        layers.forEach((L, i) => {
-          if (!L || L.ph !== ph) return;
-          const rA = g.r2 + 0.3 + (span / nLay) * i;
-          const rB = rA + (span / nLay) * 0.86;
-          const lv = levelsBetween(rA, rB, (rr) =>
-            Math.asin(Math.min(0.999, Math.max(0.01, slotHalf(d, g, rr) - 0.45) / rr)), 3);
-          m.ribbon(lv, (k * Math.PI * 2) / d.Zs, -hz, hz);
-        });
+        const L = r.wind.top[k];
+        if (!L || L.ph !== ph) continue;
+
+        // gidiş bacağı: k oluğu, üst katman
+        const [rA0, rA1] = layerR(0);
+        const lvA = levelsBetween(rA0, rA1, (rr) =>
+          Math.asin(Math.min(0.999, Math.max(0.01, slotHalf(d, g, rr) - 0.45) / rr)), 3);
+        m.ribbon(lvA, (k * Math.PI * 2) / d.Zs, -hz, hz);
+
+        // dönüş bacağı: k + adım oluğu, alt katman (tek katmanda aynı katman)
+        const kB = (k + d.coil_pitch) % d.Zs;
+        const [rB0, rB1] = layerR(nLay >= 2 ? 1 : 0);
+        const lvB = levelsBetween(rB0, rB1, (rr) =>
+          Math.asin(Math.min(0.999, Math.max(0.01, slotHalf(d, g, rr) - 0.45) / rr)), 3);
+        m.ribbon(lvB, (kB * Math.PI * 2) / d.Zs, -hz, hz);
+
+        // iki bacağı birleştiren bobin başları
+        const rMidA = (rA0 + rA1) / 2, rMidB = (rB0 + rB1) / 2;
+        m.sweep(endTurn(k, kB, rMidA, rMidB, +1), bundle);
+        m.sweep(endTurn(k, kB, rMidA, rMidB, -1), bundle);
       }
     });
   }
-
-  // --- Sargı başları: her iki uçta bakır halka ---
-  const endLen = Math.max(3, 0.55 * d.coil_pitch * g.tau_s);
-  push("endw", "Sargı başları", colors.phase[0], 0, (m) => {
-    m.tube(g.r2 + 0.3, g.r3 - 0.3, hz, hz + endLen);
-    m.tube(g.r2 + 0.3, g.r3 - 0.3, -hz - endLen, -hz);
-  });
 
   // --- Rotor ---
   // Eğim (skew) rotor oluklarını eksen boyunca burar; fotoğraftaki helisel
@@ -207,7 +279,7 @@ export function buildParts(d, r, colors) {
   if (isSCIM) {
     const c = r.cage;
     // rotor dişleri (çubuklar arası sac)
-    push("rteeth", "Rotor sacı", colors.rotor, -1, (m) => {
+    push("rteeth", "Rotor sacı", colors.rotor, -1, 1, (m) => {
       const half = (rr) => {
         let slotHalfW;
         if (rr > c.rb1) {
@@ -226,7 +298,7 @@ export function buildParts(d, r, colors) {
       m.tube(c.Rsh, c.rb0, -hz, hz);
     });
     // kafes çubukları — dibe doğru daralan, yuvarlatılmış profil
-    push("bars", "Kafes çubukları", colors.cage, -1, (m) => {
+    push("bars", "Kafes çubukları", colors.cage, -1, 2, (m) => {
       const lv = levelsBetween(c.rb0 + 0.1, c.rb1, (rr) => {
         const t = (rr - c.rb0) / Math.max(0.1, c.rb1 - c.rb0);
         const wHalf = (d.Wbar / 2) * (0.55 + 0.45 * Math.sqrt(Math.max(0, t)));
@@ -236,15 +308,15 @@ export function buildParts(d, r, colors) {
         m.ribbon(lv, (k * Math.PI * 2) / d.Zr, -hz, hz, twist);
     });
     // kısa devre halkaları
-    push("rings", "Kısa devre halkaları", colors.cage, -1, (m) => {
+    push("rings", "Kısa devre halkaları", colors.cage, -1, 2, (m) => {
       const w = 2 * d.Wbar;
       m.tube(c.rb0, c.rb1, hz, hz + w);
       m.tube(c.rb0, c.rb1, -hz - w, -hz);
     });
   } else {
-    push("rlam", "Rotor sacı", colors.rotor, -1, (m) =>
+    push("rlam", "Rotor sacı", colors.rotor, -1, 1, (m) =>
       m.tube(g.Rsh, g.Rm_in, -hz, hz));
-    push("mag", "Mıknatıslar", colors.magnet, -1, (m) => {
+    push("mag", "Mıknatıslar", colors.magnet, -1, 0, (m) => {
       const half = g.Wmag_rad / 2;
       for (let k = 0; k < 2 * d.p; k++) {
         const a = (k * Math.PI * 2) / (2 * d.p);
@@ -258,7 +330,7 @@ export function buildParts(d, r, colors) {
   const extR = Math.min(seatR, (d.Dshaft ?? 26) / 2);
   const stub = Math.max(12, 0.35 * d.L1);
   const shoulder = 4;                       // omuz payı, paket dışında
-  push("shaft", "Mil", colors.shaft, -1, (m) => {
+  push("shaft", "Mil", colors.shaft, -1, 2, (m) => {
     m.tube(0, seatR, -hz - shoulder, hz + shoulder);           // oturma çapı
     m.tube(0, extR, hz + shoulder, hz + stub);                 // tahrik ucu
     m.tube(0, extR, -hz - stub, -hz - shoulder);               // karşı uç
@@ -289,6 +361,8 @@ varying vec3 vNor, vModel;
 uniform vec3 uColor;
 uniform vec3 uEye;         // kamera yönü (model uzayında)
 uniform vec3 uKey, uFill;  // ışık yönleri, kamera çerçevesinden türetilir
+uniform float uMat;        // 0 düz, 1 sac paketi, 2 parlak metal
+uniform float uLamPitch;   // sac katman aralığı [mm]
 uniform vec2 uCut;         // x: dilimin merkez açısı, y: yarı genişliği
 uniform float uCutOn;
 void main() {
@@ -305,13 +379,31 @@ void main() {
 
   // Işıklar kamera çerçevesine bağlıdır: model döndükçe onlar da döner,
   // böylece hiçbir bakış açısında yüzeyler karanlıkta kalmaz.
+  vec3 E = normalize(uEye);
   float d = max(dot(n, uKey), 0.0) * 0.50
           + max(dot(n, uFill), 0.0) * 0.18
-          + max(dot(n, normalize(uEye)), 0.0) * 0.34
+          + max(dot(n, E), 0.0) * 0.34
           + 0.22;
+
+  // Sac paketi: eksene dik yüzeylerde katman çizgileri. Aralık aliasing'i
+  // önlemek için alt sınırlanır; katman SAYISI değil, doku amaçlıdır.
+  if (uMat > 0.5 && uMat < 1.5) {
+    float t = vModel.z / uLamPitch;
+    float stripe = 0.5 + 0.5 * cos(t * 6.2831853);
+    float side = 1.0 - abs(n.z);          // uç kapaklarda uygulanmaz
+    d *= mix(1.0, 0.88 + 0.16 * stripe, side * 0.85);
+  }
+
+  // Parlak metal: yarı-vektör ile keskin yansıma
+  float spec = 0.0;
+  if (uMat > 1.5) {
+    vec3 H = normalize(uKey + E);
+    spec = pow(max(dot(n, H), 0.0), 42.0) * 0.55;
+  }
+
   // kenar aydınlatması, biçimi ayırmak için
-  float rim = pow(1.0 - abs(n.z), 3.0) * 0.10;
-  gl_FragColor = vec4(uColor * d + rim, 1.0);
+  float rim = pow(1.0 - max(dot(n, E), 0.0), 3.0) * 0.09;
+  gl_FragColor = vec4(uColor * d + rim + spec, 1.0);
 }`;
 
 function compile(gl, type, src) {
@@ -348,6 +440,8 @@ export function createViewer(canvas) {
     eye: gl.getUniformLocation(prog, "uEye"),
     key: gl.getUniformLocation(prog, "uKey"),
     fill: gl.getUniformLocation(prog, "uFill"),
+    mat: gl.getUniformLocation(prog, "uMat"),
+    lamPitch: gl.getUniformLocation(prog, "uLamPitch"),
     cut: gl.getUniformLocation(prog, "uCut"),
     cutOn: gl.getUniformLocation(prog, "uCutOn"),
   };
@@ -363,7 +457,10 @@ export function createViewer(canvas) {
   let parts = [], buffers = [], radius = 1, bg = [0, 0, 0, 0];
   let raf = 0, dirty = true;
 
-  function setParts(next, extent) {
+  let lamPitch = 1;
+
+  function setParts(next, extent, pitch = 1) {
+    lamPitch = Math.max(0.7, pitch);
     for (const b of buffers) gl.deleteBuffer(b);
     parts = next; buffers = [];
     radius = extent;
@@ -410,6 +507,7 @@ export function createViewer(canvas) {
     gl.uniform3fv(loc.eye, new Float32Array(eye));
     gl.uniform3fv(loc.key, mix(right, up, eye, 0.45, 0.55, 0.75));
     gl.uniform3fv(loc.fill, mix(right, up, eye, -0.6, -0.35, 0.35));
+    gl.uniform1f(loc.lamPitch, lamPitch);
     const camAngle = Math.atan2(se, -ce * Math.sin(state.azim));
     gl.uniform1f(loc.cutOn, state.cut > 0.001 ? 1 : 0);
     gl.uniform2f(loc.cut, camAngle, state.cut * Math.PI);
@@ -421,6 +519,7 @@ export function createViewer(canvas) {
       gl.vertexAttribPointer(loc.pos, 3, gl.FLOAT, false, 24, 0);
       gl.vertexAttribPointer(loc.nor, 3, gl.FLOAT, false, 24, 12);
       gl.uniform3fv(loc.color, p.color);
+      gl.uniform1f(loc.mat, p.mat ?? 0);
       gl.uniform1f(loc.axial, p.axial * state.explode * radius * 1.1);
       gl.drawArrays(gl.TRIANGLES, 0, p.count);
     }

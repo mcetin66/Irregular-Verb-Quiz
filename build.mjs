@@ -27,7 +27,7 @@ const stripLocalImports = (s) =>
   s.replace(/^import\s+(?:\{[\s\S]*?\}|[\w$]+)\s+from\s+["']\.\/[^"']+["'];?\s*$/gm, "");
 
 const bundle = (await Promise.all(
-  ["src/motor.js", "src/view3d.js", "src/app.js"].map(read)
+  ["src/laminations.js", "src/motor.js", "src/view3d.js", "src/app.js"].map(read)
 )).map((s) => stripLocalImports(stripExports(s))).join("\n\n");
 
 const body = `<title>${TITLE}</title>

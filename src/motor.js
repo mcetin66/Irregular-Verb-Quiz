@@ -13,6 +13,10 @@
  * dönüşüm yalnızca export sınırında yapılır.
  */
 
+import { LAMINATIONS } from "./laminations.js";
+
+export { LAMINATIONS };
+
 export const PHASES = ["A", "B", "C"];
 
 /** Malzeme kütüphanesi. Değerler tipik katalog verileridir. */
@@ -51,23 +55,6 @@ export const MATERIALS = {
   shaft: { name: "Steel-C45", rho: 7850, rho_elec: 1.7e-7 },
   insulation: { name: "Insulation1", rho: 1400 },
 
-  /**
-   * Silisli sac kataloğu. p15 = 1,5 T / 50 Hz özgül kaybı [W/kg];
-   * khShare o kaybın histerezis payıdır (kalanı girdap akımı).
-   * Girdap payı her kalitenin kendi kalınlığına aittir, ayrıca ölçeklenmez.
-   *
-   * NOT: Temsilî katalog değerleridir. 400 Hz'i 50 Hz verisinden çıkarmak
-   * hata kaynağıdır; tedarikçinin 400 Hz eğrisiyle doğrulanmalıdır.
-   */
-  laminations: {
-    "M400-50A": { t: 0.50, p15: 4.00, khShare: 0.70, rho: 7700, Bsat: 2.00, Kf: 0.97 },
-    "M330-35A": { t: 0.35, p15: 3.30, khShare: 0.68, rho: 7650, Bsat: 2.00, Kf: 0.95 },
-    "M270-35A": { t: 0.35, p15: 2.70, khShare: 0.68, rho: 7650, Bsat: 2.00, Kf: 0.95 },
-    "M235-35A": { t: 0.35, p15: 2.35, khShare: 0.66, rho: 7600, Bsat: 1.98, Kf: 0.95 },
-    "NO20 · 0,20": { t: 0.20, p15: 2.10, khShare: 0.75, rho: 7600, Bsat: 1.95, Kf: 0.92 },
-    "NO10 · 0,10": { t: 0.10, p15: 1.90, khShare: 0.82, rho: 7600, Bsat: 1.95, Kf: 0.88 },
-    "CoFe · 0,20": { t: 0.20, p15: 2.20, khShare: 0.72, rho: 8120, Bsat: 2.35, Kf: 0.92 },
-  },
 };
 
 /**
@@ -104,9 +91,9 @@ export const CAGE_MATERIALS = {
  * ------------------------------------------------------------------ */
 /** Optimize tasarımın geometrisi (kısıtlı arama sonucu). */
 const OPT_GEOM = {
-  Rint: 32.2, W3: 2.0, H2: 9.5, W0: 1.26, H0: 0.5, H1: 0.7, R1: 0.8,
-  Ntcoil: 14, Zr: 37, Hbar: 12.5, Wbar: 2.45, Lscr: 4.9,
-  W0r: 0.8, H0r: 0.5, gap: 0.25, Drsh: 22, Dshaft: 12, speed: 5911,
+  Rint: 32.1, W3: 1.7, H2: 9.0, W0: 1.22, H0: 0.5, H1: 0.7, R1: 0.8,
+  Ntcoil: 14, Zr: 28, Hbar: 11.4, Wbar: 3.02, Lscr: 6.04,
+  W0r: 0.8, H0r: 0.5, gap: 0.26, Drsh: 24, Dshaft: 12, speed: 5901,
 };
 
 export function defaultDesign() {
@@ -123,9 +110,13 @@ export function defaultDesign() {
 
     // --- Stator oluğu ---
     Zs: 48,
-    // Oluk profili dokümandaki net oluk alanına (17,155 mm²) oturtulmuştur.
-    W0: 1.8, H0: 0.6, H1: 0.8, H2: 6.0,
-    W3: 2.0,       // diş genişliği
+    // Oluk profili ÇIKARIMDIR, ölçüm değil. İki kısıtla çözüldü:
+    //   (1) dokümandaki net oluk alanı 17,155 mm²
+    //   (2) etiketteki güç faktörü 0,720
+    // Çözüm açık oluk veriyor: ağız genişliği ≈ oluk üst genişliği.
+    // Doğrulanması gereken tek geometri budur — bkz. README.
+    W0: 2.93, H0: 0.6, H1: 0.8, H2: 5.32,
+    W3: 1.57,      // diş genişliği
     R1: 0.8,
 
     // --- Sargı ---
@@ -224,7 +215,7 @@ export function optimisedDesign() {
 
     // Üretim seçimleri
     Kf1: 0.92,
-    lamGrade: "NO20 · 0,20",
+    lamGrade: "HF-10X",
     cageMat: "Bakır çubuk",
     windType: "dikdörtgen",
     Ksfill: 0.62,
@@ -511,8 +502,67 @@ export function cageGeometry(d) {
  * Üretim seçimleri: sac, kafes, oluk kombinasyonu
  * ------------------------------------------------------------------ */
 
-export const lamOf = (d) =>
-  MATERIALS.laminations[d.lamGrade] ?? MATERIALS.laminations["M400-50A"];
+export const lamOf = (d) => LAMINATIONS[d.lamGrade] ?? LAMINATIONS["M400-50A"];
+
+const MU0 = 4e-7 * Math.PI;
+
+/**
+ * B–H eğrisinden manyetik alan şiddeti. Eğrinin üstünde kalan B için
+ * doyma sonrası eğim μ0 alınarak dışdeğerleme yapılır.
+ */
+export function Hof(lam, B) {
+  const bh = lam.bh;
+  const b = Math.abs(B);
+  if (b <= bh[0][1]) return (b / Math.max(1e-9, bh[0][1])) * bh[0][0];
+  for (let i = 1; i < bh.length; i++) {
+    if (b <= bh[i][1]) {
+      const [h0, b0] = bh[i - 1], [h1, b1] = bh[i];
+      return h0 + ((b - b0) / Math.max(1e-9, b1 - b0)) * (h1 - h0);
+    }
+  }
+  const [hL, bL] = bh[bh.length - 1];
+  return hL + (b - bL) / MU0;                 // doyma sonrası: hava gibi
+}
+
+/**
+ * Özgül demir kaybı [W/kg] — ÖLÇÜLEN yüzeyden.
+ * B içinde doğrusal, frekans içinde log-log ara değerleme yapılır
+ * (kayıp frekansla üstel artar). Veri yoksa Steinmetz'e düşer.
+ */
+export function specificLoss(lam, B, f) {
+  if (!lam.loss) {
+    // yedek: p15 varsayımı ile Steinmetz
+    const p15 = lam.p15 ?? 4.0;
+    return p15 * (B / 1.5) ** 2 * (f / 50) ** 1.5;
+  }
+  const atF = (fq) => {
+    const pts = lam.loss[fq];
+    const b = Math.abs(B);
+    if (b <= pts[0][0]) return (pts[0][1] * b * b) / Math.max(1e-9, pts[0][0] ** 2);
+    for (let i = 1; i < pts.length; i++)
+      if (b <= pts[i][0]) {
+        const [b0, p0] = pts[i - 1], [b1, p1] = pts[i];
+        return p0 + ((b - b0) / (b1 - b0)) * (p1 - p0);
+      }
+    // B aralığın üstünde: son iki noktadan üstel dışdeğerleme
+    const [b0, p0] = pts[pts.length - 2], [b1, p1] = pts[pts.length - 1];
+    const n = Math.log(p1 / p0) / Math.log(b1 / b0);
+    return p1 * (Math.abs(B) / b1) ** n;
+  };
+
+  const fs = Object.keys(lam.loss).map(Number).sort((a, b) => a - b);
+  if (f <= fs[0]) return atF(fs[0]) * (f / fs[0]) ** 1.6;
+  for (let i = 1; i < fs.length; i++)
+    if (f <= fs[i]) {
+      const f0 = fs[i - 1], f1 = fs[i];
+      const p0 = atF(f0), p1 = atF(f1);
+      const t = Math.log(f / f0) / Math.log(f1 / f0);
+      return p0 * (p1 / p0) ** t;             // log-log ara değerleme
+    }
+  const fA = fs[fs.length - 2], fB = fs[fs.length - 1];
+  const n = Math.log(atF(fB) / atF(fA)) / Math.log(fB / fA);
+  return atF(fB) * (f / fB) ** n;
+}
 export const cageOf = (d) =>
   CAGE_MATERIALS[d.cageMat] ?? CAGE_MATERIALS["Alüminyum döküm"];
 
@@ -539,14 +589,57 @@ export function stack(d) {
  */
 export function ironLoss(d, B_tooth, B_yoke, m_tooth, m_yoke) {
   const lam = lamOf(d);
-  const kh = (lam.p15 * lam.khShare) / (50 * 1.5 ** 2);
-  const ke = (lam.p15 * (1 - lam.khShare)) / (50 * 1.5) ** 2;
   const f = d.freq ?? 50;
-  const hyst = (B) => kh * f * B * B;
-  const eddy = (B) => ke * (f * B) ** 2;
-  const Ph = hyst(B_tooth) * m_tooth + hyst(B_yoke) * m_yoke;
-  const Pe = eddy(B_tooth) * m_tooth + eddy(B_yoke) * m_yoke;
-  return { Ph, Pe, total: Ph + Pe, kh, ke, lam };
+  const pT = specificLoss(lam, B_tooth, f);
+  const pY = specificLoss(lam, B_yoke, f);
+  const teeth = pT * m_tooth, yoke = pY * m_yoke;
+
+  // Bileşen ayrımı yalnızca gösterim içindir: ölçülen toplam, aynı noktadaki
+  // düşük frekans davranışından çıkarılan histerezis payına göre bölünür.
+  const pT50 = specificLoss(lam, B_tooth, 50), pY50 = specificLoss(lam, B_yoke, 50);
+  const hystShare = (p50, p, fq) => Math.min(1, Math.max(0, (p50 * (fq / 50)) / Math.max(1e-9, p)));
+  const hT = hystShare(pT50, pT, f), hY = hystShare(pY50, pY, f);
+  const Ph = teeth * hT + yoke * hY;
+
+  return {
+    Ph, Pe: teeth + yoke - Ph, total: teeth + yoke,
+    teeth, yoke, pT, pY, lam,
+    measured: !!lam.loss,
+  };
+}
+
+/**
+ * Doyma faktörü — B–H eğrisinden manyeto-motor kuvvet dengesiyle.
+ *
+ * Bir kutup çifti boyunca akı yolu: 2 hava aralığı, 2 stator dişi,
+ * 2 rotor dişi, 1 stator boyunduruğu, 1 rotor boyunduruğu.
+ *
+ *   ksat = ΣF / (2·F_hava)
+ *
+ * Boyunduruklarda B yol boyunca değiştiği için H·L değeri cY katsayısıyla
+ * düzeltilir (yayınlarda 0,3–0,5; burada 0,4).
+ *
+ * Bu, daha önce sabit 1,3 olarak VARSAYILAN değerin yerini alır.
+ */
+export function saturationFactor(d, flux, kc) {
+  const mm = 1e-3, lam = lamOf(d), cY = 0.4;
+  const g = geometry(d), c = cageGeometry(d);
+  const H = (B) => Hof(lam, B);
+
+  const F_gap = (flux.Bg * kc * d.gap * mm) / MU0;
+  const F_ts = H(flux.Bt) * (d.H0 + d.H1 + d.H2) * mm;
+  const F_tr = H(flux.Btr) * (d.Hbar + d.H0r) * mm;
+
+  // boyunduruk yol uzunlukları: ortalama yarıçapta kutup başına yay
+  const L_ys = (Math.PI * ((d.Rext + g.r3) / 2) * mm) / (2 * d.p);
+  const L_yr = (Math.PI * ((c.rb0 + c.Rsh) / 2) * mm) / (2 * d.p);
+  const F_ys = cY * H(flux.By) * L_ys;
+  const F_yr = cY * H(flux.Byr) * L_yr;
+
+  const F_iron = 2 * F_ts + 2 * F_tr + F_ys + F_yr;
+  const ksat = F_gap > 1e-9 ? (2 * F_gap + F_iron) / (2 * F_gap) : 1;
+  return { ksat: Math.max(1, Math.min(4, ksat)),
+           F_gap, F_ts, F_tr, F_ys, F_yr, F_iron };
 }
 
 /**
@@ -774,8 +867,6 @@ export function analyseSCIM(d) {
   const kc_r = d.rotorClosed ? 1 : carter(c.tau_r, d.W0r, d.gap);
   const kc = kc_s * kc_r;
 
-  const Xm = d.Xm > 0 ? d.Xm : magnetizingX(d, w, kc);
-
   // Kafes direnci: doküman değeri ya da çubuk + halka geometrisinden
   const cageR = cageResistance(d, w);
   const Rr0 = d.RrMode === "geometri" ? cageR.Rr : d.Rr;
@@ -795,7 +886,33 @@ export function analyseSCIM(d) {
 
   const ns = (60 * d.freq) / d.p;                // senkron devir [d/dk]
   const s = (ns - d.speed) / ns;
-  const op = solveSlip(dEff, Xm, s, Rr0, Xlr0);
+
+  /** Verilen çalışma noktasından akı yoğunlukları. */
+  const fluxOf = (o) => {
+    const E = Math.max(1, o.V - o.I1 * (dEff.Rs * o.pf + dEff.Xls * Math.sqrt(1 - o.pf ** 2)));
+    const Phi = E / (4.44 * d.freq * w.Nph * w.kw1);
+    const Bg = ((Math.PI / 2) * Phi) / (g.tau_p * mm * d.L1 * mm);
+    return {
+      Phi, Bg,
+      Bt: (Bg * g.tau_s * mm) / (d.W3 * mm * d.Kf1),
+      By: Phi / (2 * g.hy * mm * d.L1 * mm * d.Kf1),
+      Btr: (Bg * c.tau_r * mm) / (c.W3r * mm * d.Kf1),
+      Byr: Phi / (2 * c.hyr * mm * d.L1 * mm * d.Kf1),
+    };
+  };
+
+  // Doyma faktörü ile mıknatıslanma reaktansı birbirine bağlıdır:
+  // Xm doymaya, doyma da akıya, akı da Xm'e. Sönümlü yineleme ile çözülür.
+  let ksat = 1.0, Xm = 0, op = null, flux = null, mmf = null;
+  for (let it = 0; it < 20; it++) {
+    Xm = d.Xm > 0 ? d.Xm : magnetizingX(d, w, kc, ksat);
+    op = solveSlip(dEff, Xm, s, Rr0, Xlr0);
+    flux = fluxOf(op);
+    mmf = saturationFactor(d, flux, kc);
+    const diff = mmf.ksat - ksat;
+    ksat += 0.7 * diff;
+    if (Math.abs(diff) < 2e-4) break;
+  }
 
   // eta aşağıda, demir kaybı hesaplandıktan sonra tamamlanır
 
@@ -809,15 +926,7 @@ export function analyseSCIM(d) {
   const peak = curve.reduce((a, b) => (b.T > a.T ? b : a));
   const start = solveSlip(dEff, Xm, 1, Rr0, Xlr0);
 
-  // --- Manyetik akı: stator empedansı düşüldükten sonraki hava aralığı EMK'si ---
-  const E = Math.max(1, op.V - op.I1 * (d.Rs * op.pf + d.Xls * Math.sqrt(1 - op.pf ** 2)));
-  const Phi = E / (4.44 * d.freq * w.Nph * w.kw1);   // kutup başına akı [Wb]
-  const tau_p = g.tau_p * mm;
-  const Bg = (Math.PI / 2) * Phi / (tau_p * d.L1 * mm);  // tepe hava aralığı akısı
-  const Bt = (Bg * g.tau_s * mm) / (d.W3 * mm * d.Kf1);
-  const By = Phi / (2 * g.hy * mm * d.L1 * mm * d.Kf1);
-  const Btr = (Bg * c.tau_r * mm) / (c.W3r * mm * d.Kf1);
-  const Byr = Phi / (2 * c.hyr * mm * d.L1 * mm * d.Kf1);
+  const { Phi, Bg, Bt, By, Btr, Byr } = flux;
 
   // --- İletken / doluluk ---
   // Tel kesiti doluluk oranından türetilir: gerçek sarımda belirleyici olan
@@ -843,7 +952,7 @@ export function analyseSCIM(d) {
   };
   mass.total = mass.steel + mass.copper + mass.cage;
 
-  // --- Demir kaybı: seçilen sac kalitesinden, histerezis + girdap ayrı ---
+  // --- Demir kaybı: sac kalitesinin ÖLÇÜLEN kayıp yüzeyinden ---
   const lam = lamOf(d);
   const iron = ironLoss(d, Bt, By, V_teeth * lam.rho, V_yoke * lam.rho);
   const Pfe = iron.total;
@@ -865,6 +974,7 @@ export function analyseSCIM(d) {
     peakT: peak.T, peakS: peak.s, peakN: peak.n,
     Tstart: start.T, Ilr: start.I1,
     iron, pack, cageR, Rr0, Xlr0, statR, Rs0: dEff.Rs, Wwire_eq,
+    ksat, mmf, lam,
     fillMax: fillCeiling(d), leak: lk,
     skinStart: skinFactors(d, 1), skinRated: skinFactors(d, s),
     slots: slotRules(d.Zs, d.Zr, d.p, d.skew),

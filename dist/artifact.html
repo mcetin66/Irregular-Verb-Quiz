@@ -396,11 +396,125 @@ button.act.ghost { background: transparent; color: var(--ink-2); border-color: v
 }
 .preset[aria-pressed="true"] b { color: var(--copper); }
 @media (min-width: 1000px) { .presets { grid-column: 1 / -1; } }
+
+/* --- Malzeme eğrileri --- */
+.matcharts { display: grid; gap: 14px; margin-top: 12px; }
+@media (min-width: 620px) { .matcharts { grid-template-columns: 1fr 1fr; } }
+.matcharts figure { margin: 0; display: grid; gap: 4px; }
+.matcharts figcaption {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.chart .axlbl { fill: var(--ink-3); opacity: 0.8; }
+.chart .markline { stroke: var(--ink-3); stroke-width: 0.6; stroke-dasharray: 2 2; opacity: 0.6; }
 </style>
 
 <main class="wrap" id="app"></main>
 
 <script type="module">
+/**
+ * Silisli sac kütüphanesi — ÖLÇÜLMÜŞ veri.
+ *
+ * Kaynak: Pyleecan malzeme kütüphanesi (Eomys/pyleecan, Apache-2.0),
+ * `pyleecan/Data/Material/*.json`. Her grade için:
+ *
+ *   bh    : [[H (A/m), B (T)], ...]        doğrusal olmayan mıknatıslanma eğrisi
+ *   loss  : { f: [[B (T), P (W/kg)], ...] } ölçülen özgül kayıp, frekans başına
+ *   t     : sac kalınlığı [mm]
+ *   rho   : yoğunluk [kg/m^3]
+ *
+ * Kayıp verisi ÖLÇÜLMÜŞTÜR — 50 Hz'den Steinmetz ile çıkarım yapılmaz.
+ * Bu motor 400 Hz'de çalıştığı için fark önemlidir: M400-50A'da 400 Hz /
+ * 1,0 T ölçülen 35,9 W/kg iken 50 Hz'den çıkarım 44 W/kg verir (%23 fazla).
+ */
+
+const LAMINATIONS = {
+  "M400-50A": {
+    desc: "Yaygın, ucuz; 400 Hz için kalın",
+    t: 0.5, rho: 7650, mur_lin: 2500,
+    Kf: 0.97,
+    bh: [[0,0], [100,0.5], [150,0.7], [180,0.8], [200,0.9], [250,1], [300,1.05], [350,1.1], [450,1.15], [550,1.2], [650,1.225], [750,1.25], [850,1.275], [950,1.3], [1100,1.325], [1250,1.35], [1400,1.375], [1550,1.4], [1700,1.425], [1900,1.45], [2150,1.475], [2450,1.5], [2750,1.525], [3150,1.55], [3600,1.575], [4100,1.6], [4700,1.625], [5250,1.65], [6000,1.675], [6700,1.7], [7500,1.725], [8650,1.75], [9500,1.775], [10750,1.8], [14500,1.85], [19500,1.9], [25000,1.95], [33000,2], [44000,2.05], [57000,2.1], [74000,2.15], [96000,2.2], [130000,2.25], [170000,2.3]],
+    loss: {
+      50: [[0.1,0.02], [0.2,0.09], [0.3,0.19], [0.4,0.31], [0.5,0.46], [0.6,0.62], [0.7,0.81], [0.8,1.01], [0.9,1.24], [1,1.49], [1.1,1.76], [1.2,2.09], [1.3,2.46], [1.4,2.96], [1.5,3.57], [1.6,4.38], [1.7,5.02], [1.8,5.47]],
+      100: [[0.1,0.07], [0.2,0.26], [0.3,0.54], [0.4,0.88], [0.5,1.27], [0.6,1.73], [0.7,2.24], [0.8,2.8], [0.9,3.44], [1,4.15], [1.1,4.95], [1.2,5.85], [1.3,6.88], [1.4,8.18], [1.5,9.82]],
+      200: [[0.1,0.16], [0.2,0.64], [0.3,1.35], [0.4,2.25], [0.5,3.33], [0.6,4.58], [0.7,6.03], [0.8,7.68], [0.9,9.58], [1,11.7], [1.1,14.2], [1.2,17], [1.3,20.2], [1.4,23.8], [1.5,28.3]],
+      400: [[0.1,0.48], [0.2,1.8], [0.3,3.77], [0.4,6.29], [0.5,9.37], [0.6,13.1], [0.7,17.5], [0.8,22.7], [0.9,28.8], [1,35.9], [1.1,44.2], [1.2,53.8], [1.3,64.9], [1.4,77.4], [1.5,91.7]],
+      1000: [[0.1,2.12], [0.2,7.49], [0.3,15.3], [0.4,25.7], [0.5,39], [0.6,56.1], [0.7,77.1], [0.8,103.1], [0.9,135], [1,173.3], [1.1,218.8], [1.2,272.4], [1.3,334.6], [1.4,405.6], [1.5,488.4]],
+      2500: [[0.1,8.34], [0.2,30.1], [0.3,62.7], [0.4,109], [0.5,172], [0.6,256], [0.7,367], [0.8,509], [0.9,685], [1,899], [1.1,1155], [1.2,1453], [1.3,1793], [1.4,2130]],
+    },
+  },
+  "M235-35A": {
+    desc: "İnce ve düşük kayıplı",
+    t: 0.35, rho: 7650, mur_lin: 10000,
+    Kf: 0.95,
+    bh: [[0,0], [21.008,0.0987], [28.933,0.1965], [34.675,0.2966], [39.793,0.3897], [45.186,0.4883], [51.014,0.5894], [56.64,0.6876], [65.663,0.8002], [76.435,0.9013], [90.548,0.9973], [110.963,1.0872], [149.396,1.1979], [233.102,1.2965], [509.854,1.3984], [1479.58,1.5], [2371.85,1.5513], [3511.75,1.6026], [4961.12,1.6547], [5000,1.6574], [8000,1.7406], [10000,1.7881], [15000,1.8712], [20000,1.9261], [25000,1.9606], [30000,1.9808], [35000,1.9943], [40000,2.0052], [120000,2.1052], [199000,2.2052]],
+    loss: {
+      50: [[0.1,0.02], [0.2,0.06], [0.3,0.11], [0.4,0.2], [0.5,0.29], [0.6,0.38], [0.7,0.5], [0.8,0.62], [0.9,0.77], [1,0.92], [1.1,1.1], [1.2,1.31], [1.3,1.56], [1.4,1.92], [1.5,2.25], [1.6,2.53], [1.7,2.75], [1.8,2.94]],
+      100: [[0.1,0.04], [0.2,0.14], [0.3,0.3], [0.4,0.49], [0.5,0.71], [0.6,0.97], [0.7,1.25], [0.8,1.57], [0.9,1.92], [1,2.31], [1.1,2.75], [1.2,3.26], [1.3,3.88], [1.4,4.67], [1.5,5.54]],
+      200: [[0.1,0.08], [0.2,0.32], [0.3,0.73], [0.4,1.21], [0.5,1.78], [0.6,2.44], [0.7,3.19], [0.8,4.03], [0.9,4.97], [1,6.01], [1.1,7.19], [1.2,8.54], [1.3,10.1], [1.4,12.2], [1.5,14.4]],
+      400: [[0.1,0.19], [0.2,0.87], [0.3,1.88], [0.4,3.17], [0.5,4.73], [0.6,6.56], [0.7,8.67], [0.8,11], [0.9,13.8], [1,16.9], [1.1,20.3], [1.2,24.3], [1.3,28.9], [1.4,34.8], [1.5,41.2]],
+      1000: [[0.1,0.93], [0.2,3.55], [0.3,7.45], [0.4,12.3], [0.5,18.5], [0.6,25.8], [0.7,34.6], [0.8,45], [0.9,57.2], [1,71.5], [1.1,88.3]],
+      2500: [[0.1,3.89], [0.2,14.3], [0.3,29.6], [0.4,50.2], [0.5,76.7], [0.6,110], [0.7,153], [0.8,205], [0.9,270], [1,349]],
+    },
+  },
+  "M19 (0,36)": {
+    desc: "ABD standardı, 14 mil",
+    t: 0.356, rho: 7700, mur_lin: 2500,
+    Kf: 0.95,
+    bh: [[0,0], [15.1207,0.05], [22.7183,0.1], [27.8427,0.15], [31.8714,0.2], [35.365,0.25], [38.6006,0.3], [41.7362,0.35], [44.874,0.4], [48.0878,0.45], [51.4372,0.5], [54.9752,0.55], [58.753,0.6], [62.8236,0.65], [67.2453,0.7], [72.0844,0.75], [77.4201,0.8], [83.35,0.85], [89.9996,0.9], [97.5374,0.95], [106.201,1], [116.348,1.05], [128.547,1.1], [143.765,1.15], [163.754,1.2], [191.868,1.25], [234.834,1.3], [306.51,1.35], [435.255,1.4], [674.912,1.45], [1108.33,1.5], [1813.09,1.55], [2801.22,1.6], [4053.65,1.65], [5591.11,1.7], [7448.32,1.75], [9708.82,1.8], [12486.9,1.85], [16041.5,1.9], [21249.4,1.95], [31313.5,2], [53589.4,2.05], [88477.5,2.1], [124329,2.15], [159969,2.2], [197752,2.25], [234025,2.3]],
+    loss: {
+      50: [[0.1,0.0209195], [0.2,0.0808295], [0.3,0.183195], [0.4,0.277423], [0.5,0.409337], [0.6,0.530278], [0.7,0.678087], [0.8,0.833908], [0.9,0.999217], [1,1.19727], [1.1,1.39771], [1.2,1.63174], [1.3,1.92986], [1.4,2.28249], [1.5,2.73485], [1.6,3.11084], [1.7,3.44749]],
+      60: [[0.1,0.0282166], [0.2,0.0982462], [0.3,0.211379], [0.4,0.341616], [0.5,0.491098], [0.6,0.652992], [0.7,0.83499], [0.8,1.02687], [0.9,1.24651], [1,1.47431], [1.1,1.72116], [1.2,2.03566], [1.3,2.40748], [1.4,2.84739], [1.5,3.32415], [1.6,3.83065], [1.7,4.24521], [1.8,4.644]],
+      100: [[0.1,0.0500131], [0.2,0.176423], [0.3,0.38959], [0.4,0.62963], [0.5,0.905138], [0.6,1.20352], [0.7,1.5795], [0.8,1.91735], [0.9,2.29739], [1,2.7888], [1.1,3.25582], [1.2,3.80089], [1.3,4.49531], [1.4,5.24789], [1.5,6.2068], [1.6,7.1524], [1.7,8.03038]],
+      150: [[0.1,0.0841555], [0.2,0.293012], [0.3,0.664108], [0.4,1.03221], [0.5,1.48387], [0.6,2.07839], [0.7,2.58946], [0.8,3.26844], [0.9,3.91628], [1,4.69262], [1.1,5.62275], [1.2,6.47937], [1.3,7.56381], [1.4,8.83028], [1.5,10.5805], [1.6,12.0349], [1.7,13.5125]],
+      200: [[0.1,0.12433], [0.2,0.427304], [0.3,0.943606], [0.4,1.4858], [0.5,2.13598], [0.6,2.8772], [0.7,3.77617], [0.8,4.82883], [0.9,5.86171], [1,6.84305], [1.1,8.09344], [1.2,9.5725], [1.3,11.1746], [1.4,13.2165], [1.5,15.6315], [1.6,17.5503], [1.7,19.9627]],
+      300: [[0.1,0.18852], [0.2,0.709703], [0.3,1.60853], [0.4,2.53279], [0.5,3.73704], [0.6,5.03395], [0.7,6.60679], [0.8,8.33933], [0.9,9.99207], [1,12.1296], [1.1,14.1603], [1.2,16.9673], [1.3,20.0661], [1.4,23.4264], [1.5,27.7075]],
+      400: [[0.1,0.305081], [0.2,1.03495], [0.3,2.34565], [0.4,3.84053], [0.5,5.59332], [0.6,7.53444], [0.7,9.88874], [0.8,12.3201], [0.9,15.3499], [1,18.6329], [1.1,22.3261], [1.2,26.0649], [1.3,30.8257], [1.4,35.9871], [1.5,42.5628]],
+      600: [[0.1,0.547829], [0.2,1.85848], [0.3,3.89594], [0.4,6.71939], [0.5,9.91422], [0.6,13.7069], [0.7,17.757], [0.8,22.4136], [0.9,28.2907], [1,34.3421], [1.1,41.149], [1.2,48.6679], [1.3,57.5584]],
+      1000: [[0.1,1.27608], [0.2,3.95223], [0.3,8.50331], [0.4,13.9224], [0.5,20.5421], [0.6,28.7723], [0.7,37.7621], [0.8,48.2888], [0.9,60.9494], [1,74.9568], [1.1,90.99], [1.2,110.453], [1.3,130.627]],
+    },
+  },
+  "M19 29Ga": {
+    desc: "M19, geniş B–H ve kayıp verisi",
+    t: 0.356, rho: 7700, mur_lin: 2500,
+    Kf: 0.95,
+    bh: [[0,0], [49.1196,0.518749], [62.7561,0.661363], [68.7945,0.720435], [73.7173,0.765763], [78.1299,0.803976], [82.2678,0.837643], [86.2544,0.86808], [90.1663,0.896069], [94.0569,0.922121], [97.9669,0.94659], [101.93,0.969733], [105.976,0.991745], [110.132,1.01278], [114.426,1.03295], [118.883,1.05236], [123.533,1.07109], [128.405,1.0892], [133.53,1.10676], [138.945,1.12381], [144.688,1.14039], [150.804,1.15654], [157.342,1.17229], [164.359,1.18767], [171.919,1.2027], [180.097,1.21741], [188.98,1.23182], [198.666,1.24594], [209.272,1.25979], [220.932,1.27339], [233.805,1.28675], [248.072,1.29988], [263.947,1.31279], [281.676,1.32549], [301.542,1.338], [323.867,1.35032], [349.014,1.36246], [377.386,1.37443], [409.419,1.38623], [445.577,1.39788], [486.343,1.40937], [532.204,1.42072], [583.651,1.43192], [641.164,1.44299], [705.227,1.45393], [776.324,1.46474], [854.954,1.47543], [941.64,1.486], [1036.93,1.49646], [1141.37,1.5068], [1255.53,1.51704], [1379.91,1.52718], [1514.96,1.53721], [1661.03,1.54715], [1818.3,1.55699], [1986.83,1.56674], [2166.5,1.5764], [2357.07,1.58597], [2558.16,1.59546], [2769.36,1.60486], [2990.18,1.61418], [3220.16,1.62343], [3458.87,1.6326], [3705.93,1.64169], [3961.04,1.65071], [4223.95,1.65966], [4494.52,1.66854], [4772.67,1.67735], [5058.41,1.68609], [5351.82,1.69477], [5653.06,1.70339], [5962.33,1.71194], [6279.93,1.72043], [6606.2,1.72887], [6941.54,1.73724], [7286.43,1.74556], [7641.4,1.75382], [8007.02,1.76203], [8383.97,1.77018], [8772.95,1.77828], [9174.76,1.78633], [9590.26,1.79432], [10020.4,1.80227], [10466.2,1.81017], [10928.7,1.81802], [11409.2,1.82582], [11909,1.83358], [12429.6,1.84129], [12972.4,1.84896], [13539.1,1.85658], [14131.7,1.86416], [14752,1.8717], [15402.3,1.8792], [16084.9,1.88665], [16802.3,1.89406], [17557.2,1.90144], [18352.7,1.90877], [19192,1.91607], [20078.4,1.92333], [21015.8,1.93055], [22008,1.93774], [23059.3,1.94488], [24174.2,1.952], [25357.4,1.95908], [26613.7,1.96612], [27948.4,1.97313], [29366.6,1.9801], [30873.5,1.98705], [32474.4,1.99396], [34174.3,2.00083], [35978.3,2.00768], [37890.6,2.01449], [39915.3,2.02128], [42055.8,2.02803], [44314.7,2.03475], [46693.7,2.04145], [49193.6,2.04811], [51814.3,2.05474], [54554.6,2.06135], [57412.5,2.06793], [60384.9,2.07448], [63467.9,2.081], [66657.1,2.0875], [69947.5,2.09397], [73333.4,2.10041], [76809.3,2.10683], [80369,2.11322], [84006.6,2.11958], [87716.2,2.12592], [91492.1,2.13224], [95328.5,2.13853], [99220.1,2.14479], [103162,2.15104], [107149,2.15725], [111177,2.16345], [115242,2.16962], [119339,2.17577], [123466,2.1819], [127619,2.188], [131794,2.19408], [135990,2.20014], [140203,2.20618], [144432,2.21219], [148673,2.21819], [152926,2.22416], [157188,2.23011], [161458,2.23604], [165734,2.24196], [170015,2.24785], [174300,2.25372], [178587,2.25957], [182876,2.2654], [187166,2.27121], [191455,2.27701], [195743,2.28278], [200030,2.28854], [204314,2.29427], [208595,2.29999], [212872,2.30569], [217146,2.31137], [221415,2.31704], [225679,2.32268], [229938,2.32831], [234191,2.33392], [238438,2.33952], [242679,2.34509], [246914,2.35065], [251142,2.3562], [255362,2.36172], [259576,2.36723], [263783,2.37273], [267982,2.3782], [272173,2.38366], [276357,2.38911], [280533,2.39454], [284701,2.39995], [288860,2.40535], [293012,2.41073], [297155,2.4161], [301290,2.42145], [305417,2.42679], [309536,2.43211], [313646,2.43742], [317747,2.44271], [321840,2.44799], [325924,2.45325], [330000,2.4585]],
+    loss: {
+      50: [[0.1,0.0166], [0.2,0.0692], [0.3,0.1543], [0.4,0.2392], [0.5,0.3527], [0.6,0.463], [0.7,0.6019], [0.8,0.7496], [0.9,0.9039], [1,1.0891], [1.1,1.2787], [1.2,1.5146], [1.3,1.7902], [1.4,2.1363], [1.5,2.5596], [1.6,2.9593], [1.7,3.2894]],
+      60: [[0.1,0.0207], [0.2,0.086], [0.3,0.1786], [0.4,0.2954], [0.5,0.4321], [0.6,0.582], [0.7,0.7496], [0.8,0.9326], [0.9,1.131], [1,1.3603], [1.1,1.5961], [1.2,1.8916], [1.3,2.2355], [1.4,2.6654], [1.5,3.1747], [1.6,3.6751], [1.7,4.083], [1.8,4.4026]],
+      100: [[0.1,0.0381], [0.2,0.1579], [0.3,0.3417], [0.4,0.5556], [0.5,0.8157], [0.6,1.0803], [0.7,1.4264], [0.8,1.7637], [0.9,2.1164], [1,2.6059], [1.1,3.0865], [1.2,3.6332], [1.3,4.2814], [1.4,5.0927], [1.5,6.1068], [1.6,7.0081], [1.7,7.8053]],
+      150: [[0.1,0.0637], [0.2,0.2616], [0.3,0.5842], [0.4,0.9348], [0.5,1.3691], [0.6,1.9401], [0.7,2.4383], [0.8,3.0865], [0.9,3.7479], [1,4.4974], [1.1,5.4013], [1.2,6.3052], [1.3,7.4075], [1.4,8.8185], [1.5,10.494], [1.6,12.0512], [1.7,13.4231]],
+      200: [[0.1,0.0933], [0.2,0.3821], [0.3,0.8598], [0.4,1.3691], [0.5,2.0062], [0.6,2.6896], [0.7,3.6156], [0.8,4.6297], [0.9,5.732], [1,6.7461], [1.1,8.0469], [1.2,9.4578], [1.3,11.1554], [1.4,13.2277], [1.5,15.7631], [1.6,18.0547], [1.7,20.126]],
+      300: [[0.1,0.1629], [0.2,0.6614], [0.3,1.4991], [0.4,2.392], [0.5,3.5274], [0.6,4.8502], [0.7,6.4375], [0.8,8.1571], [0.9,9.9208], [1,12.1916], [1.1,14.33], [1.2,17.2622], [1.3,20.3487], [1.4,24.0745], [1.5,28.6601]],
+      400: [[0.1,0.2467], [0.2,0.9943], [0.3,2.2046], [0.4,3.6046], [0.5,5.4013], [0.6,7.3855], [0.7,9.8106], [0.8,12.3459], [0.9,15.5426], [1,18.9377], [1.1,22.9281], [1.2,26.9024], [1.3,31.7674], [1.4,37.4784], [1.5,44.4103]],
+      600: [[0.1,0.4519], [0.2,1.7902], [0.3,3.7479], [0.4,6.5257], [0.5,9.7003], [0.6,13.6687], [0.7,18.0338], [0.8,22.8178], [0.9,29.101], [1,35.6708], [1.1,43.2106], [1.2,51.8086], [1.3,61.3103]],
+      1000: [[0.1,1.0251], [0.2,3.9381], [0.3,8.2673], [0.4,13.9766], [0.5,20.8337], [0.6,29.5419], [0.7,39.1384], [0.8,50.7063], [0.9,64.375], [1,80.034], [1.1,97.8852], [1.2,119.618], [1.3,143.521]],
+      1500: [[0.1,1.9831], [0.2,7.4297], [0.3,15.8733], [0.4,26.0906], [0.5,40.7855], [0.6,54.8951], [0.7,74.3402], [0.8,98.7671], [0.9,125.663], [1,157.695], [1.1,194.007], [1.2,240.292], [1.3,290.829]],
+      2000: [[0.1,3.1989], [0.2,11.7238], [0.3,22.7076], [0.4,40.8371], [0.5,62.8317], [0.6,88.1849], [0.7,118.986], [0.8,156.528], [0.9,200.621], [1,257.284], [1.1,319.67], [1.2,395.334]],
+    },
+  },
+  "HF-10X": {
+    desc: "Yüksek frekans sacı, 10 kHz'e kadar ölçülü",
+    t: 0.25, rho: 7650, mur_lin: 2500,
+    Kf: 0.92,
+    bh: [[0,0], [100,0.5], [150,0.7], [180,0.8], [200,0.9], [250,1], [300,1.05], [350,1.1], [450,1.15], [550,1.2], [650,1.225], [750,1.25], [850,1.275], [950,1.3], [1100,1.325], [1250,1.35], [1400,1.375], [1550,1.4], [1700,1.425], [1900,1.45], [2150,1.475], [2450,1.5], [2750,1.525], [3150,1.55], [3600,1.575], [4100,1.6], [4700,1.625], [5250,1.65], [6000,1.675], [6700,1.7], [7500,1.725], [8650,1.75], [9500,1.775], [10750,1.8], [14500,1.85], [19500,1.9], [25000,1.95], [33000,2], [44000,2.05], [57000,2.1], [74000,2.15], [96000,2.2], [130000,2.25], [170000,2.3]],
+    loss: {
+      50: [[0.1,0.0123], [0.2,0.0556], [0.4,0.205], [0.7,0.528], [1,0.972], [1.2,1.38], [1.3,1.66], [1.4,2.02], [1.5,2.45], [1.6,2.87], [1.7,3.25]],
+      60: [[0.1,0.0151], [0.2,0.0683], [0.4,0.252], [0.7,0.651], [1,1.2], [1.2,1.71], [1.3,2.05], [1.4,2.49], [1.5,3.03], [1.6,3.54], [1.7,4]],
+      100: [[0.1,0.0271], [0.2,0.123], [0.4,0.46], [0.7,1.2], [1,2.22], [1.2,3.16], [1.3,3.78], [1.4,4.58], [1.5,5.53], [1.6,6.47], [1.7,7.23]],
+      200: [[0.1,0.0648], [0.2,0.289], [0.4,1.09], [0.7,2.91], [1,5.43], [1.2,7.7], [1.3,9.18], [1.4,11.1], [1.5,13.3], [1.6,15.5], [1.7,17.1]],
+      400: [[0.1,0.17], [0.2,0.736], [0.4,2.78], [0.7,7.55], [1,14.4], [1.2,20.4], [1.3,24.3], [1.4,29], [1.5,35], [1.6,40.1]],
+      700: [[0.1,0.396], [0.2,1.66], [0.4,6.23], [0.7,17.1], [1,33.4], [1.2,48.3], [1.3,56.9]],
+      1000: [[0.1,0.699], [0.2,2.86], [0.4,10.6], [0.7,29.4], [1,58.3], [1.2,85.2], [1.3,101.1]],
+      1500: [[0.1,1.36], [0.2,5.43], [0.4,19.8], [0.7,55.3], [1,112], [1.2,168], [1.3,200]],
+      2500: [[0.1,3.23], [0.2,12.4], [0.4,43.8], [0.7,125], [1,265]],
+      5000: [[0.1,10.4], [0.2,37.5], [0.4,128], [0.7,380], [1,842]],
+      10000: [[0.1,32.7], [0.2,113], [0.4,395]],
+    },
+  },
+};
+
+
 /**
  * Motor tasarım çekirdeği — saf hesap, DOM bağımlılığı yok.
  *
@@ -415,6 +529,9 @@ button.act.ghost { background: transparent; color: var(--ink-2); border-color: v
  * Pyleecan SI birimleri kullanır (metre). Bu modülün ARAYÜZÜ milimetre alır,
  * dönüşüm yalnızca export sınırında yapılır.
  */
+
+
+{ LAMINATIONS };
 
 const PHASES = ["A", "B", "C"];
 
@@ -454,23 +571,6 @@ const MATERIALS = {
   shaft: { name: "Steel-C45", rho: 7850, rho_elec: 1.7e-7 },
   insulation: { name: "Insulation1", rho: 1400 },
 
-  /**
-   * Silisli sac kataloğu. p15 = 1,5 T / 50 Hz özgül kaybı [W/kg];
-   * khShare o kaybın histerezis payıdır (kalanı girdap akımı).
-   * Girdap payı her kalitenin kendi kalınlığına aittir, ayrıca ölçeklenmez.
-   *
-   * NOT: Temsilî katalog değerleridir. 400 Hz'i 50 Hz verisinden çıkarmak
-   * hata kaynağıdır; tedarikçinin 400 Hz eğrisiyle doğrulanmalıdır.
-   */
-  laminations: {
-    "M400-50A": { t: 0.50, p15: 4.00, khShare: 0.70, rho: 7700, Bsat: 2.00, Kf: 0.97 },
-    "M330-35A": { t: 0.35, p15: 3.30, khShare: 0.68, rho: 7650, Bsat: 2.00, Kf: 0.95 },
-    "M270-35A": { t: 0.35, p15: 2.70, khShare: 0.68, rho: 7650, Bsat: 2.00, Kf: 0.95 },
-    "M235-35A": { t: 0.35, p15: 2.35, khShare: 0.66, rho: 7600, Bsat: 1.98, Kf: 0.95 },
-    "NO20 · 0,20": { t: 0.20, p15: 2.10, khShare: 0.75, rho: 7600, Bsat: 1.95, Kf: 0.92 },
-    "NO10 · 0,10": { t: 0.10, p15: 1.90, khShare: 0.82, rho: 7600, Bsat: 1.95, Kf: 0.88 },
-    "CoFe · 0,20": { t: 0.20, p15: 2.20, khShare: 0.72, rho: 8120, Bsat: 2.35, Kf: 0.92 },
-  },
 };
 
 /**
@@ -507,9 +607,9 @@ const CAGE_MATERIALS = {
  * ------------------------------------------------------------------ */
 /** Optimize tasarımın geometrisi (kısıtlı arama sonucu). */
 const OPT_GEOM = {
-  Rint: 32.2, W3: 2.0, H2: 9.5, W0: 1.26, H0: 0.5, H1: 0.7, R1: 0.8,
-  Ntcoil: 14, Zr: 37, Hbar: 12.5, Wbar: 2.45, Lscr: 4.9,
-  W0r: 0.8, H0r: 0.5, gap: 0.25, Drsh: 22, Dshaft: 12, speed: 5911,
+  Rint: 32.1, W3: 1.7, H2: 9.0, W0: 1.22, H0: 0.5, H1: 0.7, R1: 0.8,
+  Ntcoil: 14, Zr: 28, Hbar: 11.4, Wbar: 3.02, Lscr: 6.04,
+  W0r: 0.8, H0r: 0.5, gap: 0.26, Drsh: 24, Dshaft: 12, speed: 5901,
 };
 
 function defaultDesign() {
@@ -526,9 +626,13 @@ function defaultDesign() {
 
     // --- Stator oluğu ---
     Zs: 48,
-    // Oluk profili dokümandaki net oluk alanına (17,155 mm²) oturtulmuştur.
-    W0: 1.8, H0: 0.6, H1: 0.8, H2: 6.0,
-    W3: 2.0,       // diş genişliği
+    // Oluk profili ÇIKARIMDIR, ölçüm değil. İki kısıtla çözüldü:
+    //   (1) dokümandaki net oluk alanı 17,155 mm²
+    //   (2) etiketteki güç faktörü 0,720
+    // Çözüm açık oluk veriyor: ağız genişliği ≈ oluk üst genişliği.
+    // Doğrulanması gereken tek geometri budur — bkz. README.
+    W0: 2.93, H0: 0.6, H1: 0.8, H2: 5.32,
+    W3: 1.57,      // diş genişliği
     R1: 0.8,
 
     // --- Sargı ---
@@ -627,7 +731,7 @@ function optimisedDesign() {
 
     // Üretim seçimleri
     Kf1: 0.92,
-    lamGrade: "NO20 · 0,20",
+    lamGrade: "HF-10X",
     cageMat: "Bakır çubuk",
     windType: "dikdörtgen",
     Ksfill: 0.62,
@@ -914,8 +1018,67 @@ function cageGeometry(d) {
  * Üretim seçimleri: sac, kafes, oluk kombinasyonu
  * ------------------------------------------------------------------ */
 
-const lamOf = (d) =>
-  MATERIALS.laminations[d.lamGrade] ?? MATERIALS.laminations["M400-50A"];
+const lamOf = (d) => LAMINATIONS[d.lamGrade] ?? LAMINATIONS["M400-50A"];
+
+const MU0 = 4e-7 * Math.PI;
+
+/**
+ * B–H eğrisinden manyetik alan şiddeti. Eğrinin üstünde kalan B için
+ * doyma sonrası eğim μ0 alınarak dışdeğerleme yapılır.
+ */
+function Hof(lam, B) {
+  const bh = lam.bh;
+  const b = Math.abs(B);
+  if (b <= bh[0][1]) return (b / Math.max(1e-9, bh[0][1])) * bh[0][0];
+  for (let i = 1; i < bh.length; i++) {
+    if (b <= bh[i][1]) {
+      const [h0, b0] = bh[i - 1], [h1, b1] = bh[i];
+      return h0 + ((b - b0) / Math.max(1e-9, b1 - b0)) * (h1 - h0);
+    }
+  }
+  const [hL, bL] = bh[bh.length - 1];
+  return hL + (b - bL) / MU0;                 // doyma sonrası: hava gibi
+}
+
+/**
+ * Özgül demir kaybı [W/kg] — ÖLÇÜLEN yüzeyden.
+ * B içinde doğrusal, frekans içinde log-log ara değerleme yapılır
+ * (kayıp frekansla üstel artar). Veri yoksa Steinmetz'e düşer.
+ */
+function specificLoss(lam, B, f) {
+  if (!lam.loss) {
+    // yedek: p15 varsayımı ile Steinmetz
+    const p15 = lam.p15 ?? 4.0;
+    return p15 * (B / 1.5) ** 2 * (f / 50) ** 1.5;
+  }
+  const atF = (fq) => {
+    const pts = lam.loss[fq];
+    const b = Math.abs(B);
+    if (b <= pts[0][0]) return (pts[0][1] * b * b) / Math.max(1e-9, pts[0][0] ** 2);
+    for (let i = 1; i < pts.length; i++)
+      if (b <= pts[i][0]) {
+        const [b0, p0] = pts[i - 1], [b1, p1] = pts[i];
+        return p0 + ((b - b0) / (b1 - b0)) * (p1 - p0);
+      }
+    // B aralığın üstünde: son iki noktadan üstel dışdeğerleme
+    const [b0, p0] = pts[pts.length - 2], [b1, p1] = pts[pts.length - 1];
+    const n = Math.log(p1 / p0) / Math.log(b1 / b0);
+    return p1 * (Math.abs(B) / b1) ** n;
+  };
+
+  const fs = Object.keys(lam.loss).map(Number).sort((a, b) => a - b);
+  if (f <= fs[0]) return atF(fs[0]) * (f / fs[0]) ** 1.6;
+  for (let i = 1; i < fs.length; i++)
+    if (f <= fs[i]) {
+      const f0 = fs[i - 1], f1 = fs[i];
+      const p0 = atF(f0), p1 = atF(f1);
+      const t = Math.log(f / f0) / Math.log(f1 / f0);
+      return p0 * (p1 / p0) ** t;             // log-log ara değerleme
+    }
+  const fA = fs[fs.length - 2], fB = fs[fs.length - 1];
+  const n = Math.log(atF(fB) / atF(fA)) / Math.log(fB / fA);
+  return atF(fB) * (f / fB) ** n;
+}
 const cageOf = (d) =>
   CAGE_MATERIALS[d.cageMat] ?? CAGE_MATERIALS["Alüminyum döküm"];
 
@@ -942,14 +1105,57 @@ function stack(d) {
  */
 function ironLoss(d, B_tooth, B_yoke, m_tooth, m_yoke) {
   const lam = lamOf(d);
-  const kh = (lam.p15 * lam.khShare) / (50 * 1.5 ** 2);
-  const ke = (lam.p15 * (1 - lam.khShare)) / (50 * 1.5) ** 2;
   const f = d.freq ?? 50;
-  const hyst = (B) => kh * f * B * B;
-  const eddy = (B) => ke * (f * B) ** 2;
-  const Ph = hyst(B_tooth) * m_tooth + hyst(B_yoke) * m_yoke;
-  const Pe = eddy(B_tooth) * m_tooth + eddy(B_yoke) * m_yoke;
-  return { Ph, Pe, total: Ph + Pe, kh, ke, lam };
+  const pT = specificLoss(lam, B_tooth, f);
+  const pY = specificLoss(lam, B_yoke, f);
+  const teeth = pT * m_tooth, yoke = pY * m_yoke;
+
+  // Bileşen ayrımı yalnızca gösterim içindir: ölçülen toplam, aynı noktadaki
+  // düşük frekans davranışından çıkarılan histerezis payına göre bölünür.
+  const pT50 = specificLoss(lam, B_tooth, 50), pY50 = specificLoss(lam, B_yoke, 50);
+  const hystShare = (p50, p, fq) => Math.min(1, Math.max(0, (p50 * (fq / 50)) / Math.max(1e-9, p)));
+  const hT = hystShare(pT50, pT, f), hY = hystShare(pY50, pY, f);
+  const Ph = teeth * hT + yoke * hY;
+
+  return {
+    Ph, Pe: teeth + yoke - Ph, total: teeth + yoke,
+    teeth, yoke, pT, pY, lam,
+    measured: !!lam.loss,
+  };
+}
+
+/**
+ * Doyma faktörü — B–H eğrisinden manyeto-motor kuvvet dengesiyle.
+ *
+ * Bir kutup çifti boyunca akı yolu: 2 hava aralığı, 2 stator dişi,
+ * 2 rotor dişi, 1 stator boyunduruğu, 1 rotor boyunduruğu.
+ *
+ *   ksat = ΣF / (2·F_hava)
+ *
+ * Boyunduruklarda B yol boyunca değiştiği için H·L değeri cY katsayısıyla
+ * düzeltilir (yayınlarda 0,3–0,5; burada 0,4).
+ *
+ * Bu, daha önce sabit 1,3 olarak VARSAYILAN değerin yerini alır.
+ */
+function saturationFactor(d, flux, kc) {
+  const mm = 1e-3, lam = lamOf(d), cY = 0.4;
+  const g = geometry(d), c = cageGeometry(d);
+  const H = (B) => Hof(lam, B);
+
+  const F_gap = (flux.Bg * kc * d.gap * mm) / MU0;
+  const F_ts = H(flux.Bt) * (d.H0 + d.H1 + d.H2) * mm;
+  const F_tr = H(flux.Btr) * (d.Hbar + d.H0r) * mm;
+
+  // boyunduruk yol uzunlukları: ortalama yarıçapta kutup başına yay
+  const L_ys = (Math.PI * ((d.Rext + g.r3) / 2) * mm) / (2 * d.p);
+  const L_yr = (Math.PI * ((c.rb0 + c.Rsh) / 2) * mm) / (2 * d.p);
+  const F_ys = cY * H(flux.By) * L_ys;
+  const F_yr = cY * H(flux.Byr) * L_yr;
+
+  const F_iron = 2 * F_ts + 2 * F_tr + F_ys + F_yr;
+  const ksat = F_gap > 1e-9 ? (2 * F_gap + F_iron) / (2 * F_gap) : 1;
+  return { ksat: Math.max(1, Math.min(4, ksat)),
+           F_gap, F_ts, F_tr, F_ys, F_yr, F_iron };
 }
 
 /**
@@ -1177,8 +1383,6 @@ function analyseSCIM(d) {
   const kc_r = d.rotorClosed ? 1 : carter(c.tau_r, d.W0r, d.gap);
   const kc = kc_s * kc_r;
 
-  const Xm = d.Xm > 0 ? d.Xm : magnetizingX(d, w, kc);
-
   // Kafes direnci: doküman değeri ya da çubuk + halka geometrisinden
   const cageR = cageResistance(d, w);
   const Rr0 = d.RrMode === "geometri" ? cageR.Rr : d.Rr;
@@ -1198,7 +1402,33 @@ function analyseSCIM(d) {
 
   const ns = (60 * d.freq) / d.p;                // senkron devir [d/dk]
   const s = (ns - d.speed) / ns;
-  const op = solveSlip(dEff, Xm, s, Rr0, Xlr0);
+
+  /** Verilen çalışma noktasından akı yoğunlukları. */
+  const fluxOf = (o) => {
+    const E = Math.max(1, o.V - o.I1 * (dEff.Rs * o.pf + dEff.Xls * Math.sqrt(1 - o.pf ** 2)));
+    const Phi = E / (4.44 * d.freq * w.Nph * w.kw1);
+    const Bg = ((Math.PI / 2) * Phi) / (g.tau_p * mm * d.L1 * mm);
+    return {
+      Phi, Bg,
+      Bt: (Bg * g.tau_s * mm) / (d.W3 * mm * d.Kf1),
+      By: Phi / (2 * g.hy * mm * d.L1 * mm * d.Kf1),
+      Btr: (Bg * c.tau_r * mm) / (c.W3r * mm * d.Kf1),
+      Byr: Phi / (2 * c.hyr * mm * d.L1 * mm * d.Kf1),
+    };
+  };
+
+  // Doyma faktörü ile mıknatıslanma reaktansı birbirine bağlıdır:
+  // Xm doymaya, doyma da akıya, akı da Xm'e. Sönümlü yineleme ile çözülür.
+  let ksat = 1.0, Xm = 0, op = null, flux = null, mmf = null;
+  for (let it = 0; it < 20; it++) {
+    Xm = d.Xm > 0 ? d.Xm : magnetizingX(d, w, kc, ksat);
+    op = solveSlip(dEff, Xm, s, Rr0, Xlr0);
+    flux = fluxOf(op);
+    mmf = saturationFactor(d, flux, kc);
+    const diff = mmf.ksat - ksat;
+    ksat += 0.7 * diff;
+    if (Math.abs(diff) < 2e-4) break;
+  }
 
   // eta aşağıda, demir kaybı hesaplandıktan sonra tamamlanır
 
@@ -1212,15 +1442,7 @@ function analyseSCIM(d) {
   const peak = curve.reduce((a, b) => (b.T > a.T ? b : a));
   const start = solveSlip(dEff, Xm, 1, Rr0, Xlr0);
 
-  // --- Manyetik akı: stator empedansı düşüldükten sonraki hava aralığı EMK'si ---
-  const E = Math.max(1, op.V - op.I1 * (d.Rs * op.pf + d.Xls * Math.sqrt(1 - op.pf ** 2)));
-  const Phi = E / (4.44 * d.freq * w.Nph * w.kw1);   // kutup başına akı [Wb]
-  const tau_p = g.tau_p * mm;
-  const Bg = (Math.PI / 2) * Phi / (tau_p * d.L1 * mm);  // tepe hava aralığı akısı
-  const Bt = (Bg * g.tau_s * mm) / (d.W3 * mm * d.Kf1);
-  const By = Phi / (2 * g.hy * mm * d.L1 * mm * d.Kf1);
-  const Btr = (Bg * c.tau_r * mm) / (c.W3r * mm * d.Kf1);
-  const Byr = Phi / (2 * c.hyr * mm * d.L1 * mm * d.Kf1);
+  const { Phi, Bg, Bt, By, Btr, Byr } = flux;
 
   // --- İletken / doluluk ---
   // Tel kesiti doluluk oranından türetilir: gerçek sarımda belirleyici olan
@@ -1246,7 +1468,7 @@ function analyseSCIM(d) {
   };
   mass.total = mass.steel + mass.copper + mass.cage;
 
-  // --- Demir kaybı: seçilen sac kalitesinden, histerezis + girdap ayrı ---
+  // --- Demir kaybı: sac kalitesinin ÖLÇÜLEN kayıp yüzeyinden ---
   const lam = lamOf(d);
   const iron = ironLoss(d, Bt, By, V_teeth * lam.rho, V_yoke * lam.rho);
   const Pfe = iron.total;
@@ -1268,6 +1490,7 @@ function analyseSCIM(d) {
     peakT: peak.T, peakS: peak.s, peakN: peak.n,
     Tstart: start.T, Ilr: start.I1,
     iron, pack, cageR, Rr0, Xlr0, statR, Rs0: dEff.Rs, Wwire_eq,
+    ksat, mmf, lam,
     fillMax: fillCeiling(d), leak: lk,
     skinStart: skinFactors(d, 1), skinRated: skinFactors(d, s),
     slots: slotRules(d.Zs, d.Zr, d.p, d.skew),
@@ -2259,7 +2482,7 @@ const groupsFor = (d) => (d.type === "scim" ? GROUPS_SCIM : GROUPS_SPM);
 
 /* Üretim seçimleri: liste hâlinde seçilenler ve açık/kapalı anahtarlar */
 const CHOICES = [
-  { key: "lamGrade", label: "Silisli sac", opts: () => Object.keys(MATERIALS.laminations) },
+  { key: "lamGrade", label: "Silisli sac", opts: () => Object.keys(LAMINATIONS) },
   { key: "cageMat", label: "Rotor kafesi", opts: () => Object.keys(CAGE_MATERIALS) },
   { key: "RrMode", label: "Rotor direnci kaynağı",
     opts: () => ["manual", "geometri"],
@@ -2463,6 +2686,54 @@ function drawSection(r) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Malzeme eğrileri: B(H) ve özgül kayıp
+ * ------------------------------------------------------------------ */
+function drawXY(pts, marks, logX = false) {
+  // Bozuk geometride akı yoğunlukları sonsuza gidebilir; eksenleri koru.
+  const fin = (v, alt = 0) => (Number.isFinite(v) ? v : alt);
+  pts = pts.filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+  marks = marks.filter((m) => Number.isFinite(m.x) && Number.isFinite(m.y));
+  if (!pts.length) pts = [[0, 0], [1, 1]];
+
+  const W = 320, H = 168, pad = { l: 38, r: 10, t: 8, b: 26 };
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img",
+    "aria-label": "eğri" });
+  const add = (t, a) => { const e = svgEl(t, a); svg.appendChild(e); return e; };
+
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  const x0 = logX ? Math.max(1, Math.min(...xs)) : 0;
+  const x1 = Math.max(x0 * 1.01, Math.max(...xs));
+  const y1 = Math.max(1e-6, fin(Math.max(...ys, ...marks.map((m) => m.y)), 1)) * 1.08;
+  const tx = (v) => logX
+    ? Math.log(Math.max(x0, v) / x0) / Math.log(x1 / x0)
+    : v / x1;
+  const X = (v) => pad.l + (W - pad.l - pad.r) * Math.min(1, Math.max(0, tx(v)));
+  const Y = (v) => H - pad.b - (H - pad.t - pad.b) * Math.min(1, Math.max(0, v / y1));
+
+  for (let i = 0; i <= 4; i++) {
+    const v = (y1 * i) / 4;
+    add("line", { x1: pad.l, x2: W - pad.r, y1: Y(v), y2: Y(v), class: "grid" });
+    add("text", { x: pad.l - 4, y: Y(v) + 3, class: "tick", "text-anchor": "end" })
+      .textContent = v >= 100 ? v.toFixed(0) : v.toFixed(v < 10 ? 1 : 0);
+  }
+  const xticks = logX
+    ? [x0, Math.sqrt(x0 * x1), x1]
+    : [0, x1 / 2, x1];
+  for (const v of xticks)
+    add("text", { x: X(v), y: H - 8, class: "tick", "text-anchor": "middle" })
+      .textContent = v >= 1000 ? (v / 1000).toFixed(0) + "k" : v.toFixed(v < 10 ? 1 : 0);
+  add("path", { d: pts.map((p, i) => `${i ? "L" : "M"} ${X(p[0]).toFixed(2)} ${Y(p[1]).toFixed(2)}`).join(" "),
+    class: "curve" });
+
+  for (const m of marks) {
+    add("line", { x1: X(m.x), x2: X(m.x), y1: Y(0), y2: Y(m.y), class: "markline" });
+    add("circle", { cx: X(m.x), cy: Y(m.y), r: 3.2, class: `pt-${m.cls}` });
+    add("text", { x: X(m.x) + 5, y: Y(m.y) - 5, class: "pointlbl" }).textContent = m.label;
+  }
+  return svg;
+}
+
+/* ------------------------------------------------------------------ *
  * Moment / devir eğrisi
  * ------------------------------------------------------------------ */
 function drawCurve(r) {
@@ -2555,6 +2826,15 @@ document.getElementById("app").innerHTML = `
 <section id="sec-plate" hidden><h2>Etiket karşılaştırması</h2><div class="card">
   <div class="rows" id="plate"></div>
   <p class="note">Sol sütun modelin hesabı, sağ sütun dokümandaki değer.</p>
+</div></section>
+
+<section id="sec-mat" hidden><h2>Silisli sac</h2><div class="card">
+  <div class="rows" id="matinfo"></div>
+  <div class="matcharts">
+    <figure><figcaption>Mıknatıslanma eğrisi · B (T) / H (A·m⁻¹)</figcaption><div id="bhchart"></div></figure>
+    <figure><figcaption id="losscap">Özgül kayıp</figcaption><div id="losschart"></div></figure>
+  </div>
+  <p class="note" id="matnote"></p>
 </div></section>
 
 <section id="sec-slots" hidden><h2>Oluk kombinasyonu</h2><div class="card">
@@ -2918,6 +3198,58 @@ function render() {
       e.appendChild(v);
       return e;
     }));
+  }
+
+  // --- Silisli sac: özellikler ve eğriler ---
+  const matSec = document.getElementById("sec-mat");
+  matSec.hidden = !isSCIM;
+  if (isSCIM) {
+    const lam = lamOf(D);
+    const rows = [
+      ["Kalite", D.lamGrade, ""],
+      ["Açıklama", lam.desc, ""],
+      ["Sac kalınlığı", fx(lam.t, 2), "mm"],
+      ["Lamina sayısı", fx(r.pack.count, 0), "adet"],
+      ["Yoğunluk", fx(lam.rho, 0), "kg/m³"],
+      ["B–H eğrisi", `${lam.bh.length} nokta, ${lam.bh[lam.bh.length - 1][1].toFixed(2)} T'ye kadar`, ""],
+      ["Kayıp verisi", lam.loss
+        ? `ölçülen, ${Object.keys(lam.loss).length} frekans (${Object.keys(lam.loss)[0]}–${
+            Object.keys(lam.loss).slice(-1)[0]} Hz)`
+        : "yok — Steinmetz çıkarımı", ""],
+      ["Diş kaybı", fx(r.iron.pT, 1), "W/kg"],
+      ["Boyunduruk kaybı", fx(r.iron.pY, 1), "W/kg"],
+      ["Doyma faktörü ksat", fx(r.ksat, 3), ""],
+      ["MMK — hava aralığı", fx(2 * r.mmf.F_gap, 1), "A"],
+      ["MMK — demir", fx(r.mmf.F_iron, 2), "A"],
+    ];
+    document.getElementById("matinfo").replaceChildren(...rows.map(([n, v, u]) => {
+      const e = el("div", "row");
+      e.appendChild(el("div", "n", n));
+      const val = el("div", "v");
+      val.innerHTML = `${v}${u ? ` <span>${u}</span>` : ""}`;
+      e.appendChild(val);
+      return e;
+    }));
+
+    document.getElementById("bhchart").replaceChildren(drawXY(
+      lam.bh, [
+        { x: Hof(lam, r.Bt), y: r.Bt, cls: "op", label: "diş" },
+        { x: Hof(lam, r.By), y: r.By, cls: "peak", label: "boyunduruk" },
+      ], true));
+
+    const fOp = D.freq;
+    const lossPts = [];
+    for (let B = 0.1; B <= 1.8001; B += 0.05) lossPts.push([B, specificLoss(lam, B, fOp)]);
+    document.getElementById("losschart").replaceChildren(drawXY(
+      lossPts, [
+        { x: r.Bt, y: r.iron.pT, cls: "op", label: "diş" },
+        { x: r.By, y: r.iron.pY, cls: "peak", label: "boyunduruk" },
+      ]));
+    document.getElementById("losscap").textContent = `Özgül kayıp @ ${fOp} Hz · W·kg⁻¹ / B (T)`;
+    document.getElementById("matnote").textContent = lam.loss
+      ? "Kayıp eğrisi ölçülen veriden ara değerlendirilir (frekansta log-log). " +
+        "Doyma faktörü B–H eğrisinden manyeto-motor kuvvet dengesiyle hesaplanır — varsayım değildir."
+      : "Bu grade için ölçülen kayıp verisi yok; Steinmetz çıkarımı kullanılıyor.";
   }
 
   // --- Oluk kombinasyonu kuralları ---

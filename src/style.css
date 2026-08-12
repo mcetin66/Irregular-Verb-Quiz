@@ -393,3 +393,14 @@ button.act.ghost { background: transparent; color: var(--ink-2); border-color: v
 }
 .preset[aria-pressed="true"] b { color: var(--copper); }
 @media (min-width: 1000px) { .presets { grid-column: 1 / -1; } }
+
+/* --- Malzeme eğrileri --- */
+.matcharts { display: grid; gap: 14px; margin-top: 12px; }
+@media (min-width: 620px) { .matcharts { grid-template-columns: 1fr 1fr; } }
+.matcharts figure { margin: 0; display: grid; gap: 4px; }
+.matcharts figcaption {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.chart .axlbl { fill: var(--ink-3); opacity: 0.8; }
+.chart .markline { stroke: var(--ink-3); stroke-width: 0.6; stroke-dasharray: 2 2; opacity: 0.6; }

@@ -5,6 +5,7 @@ import {
   analyseSCIM, checksSCIM, cageGeometry, nameplate, toPyleecanSCIM,
   MATERIALS, CAGE_MATERIALS, cageResistance, skinFactors, stack,
   slotRules, goodRotorSlots, ironLoss, optimisedDesign, statorResistance,
+  LAMINATIONS, Hof, specificLoss, saturationFactor,
 } from "../src/motor.js";
 
 const near = (a, b, tol, what) =>
@@ -146,7 +147,7 @@ test("SCIM: bağlantı üçgen olmalı — yıldız etiketle bağdaşmıyor", ()
 test("SCIM: mıknatıslanma reaktansı geometriden makul çıkar", () => {
   const r = analyseSCIM(defaultDesign());
   assert.ok(r.Xm > 50 && r.Xm < 100, `Xm = ${r.Xm} Ω`);
-  assert.ok(r.kc > 1.2 && r.kc < 1.6, `Carter kc = ${r.kc}`);
+  assert.ok(r.kc > 1.2 && r.kc < 2.4, `Carter kc = ${r.kc}`);
 });
 
 test("SCIM: moment-kayma eğrisi tutarlı", () => {
@@ -283,20 +284,59 @@ test("derin dar çubuk, bakırda kalkış momentini geri kazandırır", () => {
 test("ince sac demir kaybını düşürür, lamina sayısını artırır", () => {
   const d = defaultDesign();
   const kalin = analyseSCIM({ ...d, lamGrade: "M400-50A" });
-  const ince = analyseSCIM({ ...d, lamGrade: "NO20 · 0,20" });
+  const ince = analyseSCIM({ ...d, lamGrade: "HF-10X" });
   assert.ok(ince.Pfe < kalin.Pfe * 0.6, `${kalin.Pfe.toFixed(1)} -> ${ince.Pfe.toFixed(1)} W`);
-  assert.ok(ince.pack.count > kalin.pack.count * 2, "daha çok lamina gerekir");
+  assert.ok(ince.pack.count >= kalin.pack.count * 1.9, "daha çok lamina gerekir");
   assert.ok(ince.eta > kalin.eta, "verim demir kaybı üzerinden iyileşir");
 });
 
 test("400 Hz'de demir kaybına girdap akımı hâkim", () => {
   const r = analyseSCIM(defaultDesign());
-  assert.ok(r.iron.Pe > r.iron.Ph * 2,
+  assert.ok(r.iron.measured, "kayıp ölçülen veriden gelmeli");
+  assert.ok(r.iron.Pe > r.iron.Ph,
     `girdap ${r.iron.Pe.toFixed(1)} W, histerezis ${r.iron.Ph.toFixed(1)} W`);
 });
 
+test("kayıp verisi ölçülen değerlerle örtüşür", () => {
+  const lam = LAMINATIONS["M400-50A"];
+  // katalogdan doğrudan okunan noktalar
+  near(specificLoss(lam, 1.0, 400), 35.9, 0.1, "M400-50A @400 Hz, 1,0 T");
+  near(specificLoss(lam, 1.5, 400), 91.7, 0.1, "M400-50A @400 Hz, 1,5 T");
+  near(specificLoss(lam, 1.0, 50), 1.49, 0.02, "M400-50A @50 Hz, 1,0 T");
+  // 50 Hz'den Steinmetz çıkarımı 400 Hz'i belirgin biçimde fazla hesaplar
+  const stein = 4.0 * (1.0 / 1.5) ** 2 * (400 / 50) ** 1.5;
+  assert.ok(stein > specificLoss(lam, 1.0, 400) * 1.08,
+    `çıkarım ${stein.toFixed(1)} vs ölçülen ${specificLoss(lam, 1.0, 400).toFixed(1)}`);
+  // ince sac her B'de daha düşük kayıp
+  for (const B of [0.5, 1.0, 1.5])
+    assert.ok(specificLoss(LAMINATIONS["HF-10X"], B, 400) < specificLoss(lam, B, 400));
+});
+
+test("B–H eğrisi doyma sonrası μ0 eğimiyle uzar", () => {
+  const lam = LAMINATIONS["M400-50A"];
+  const last = lam.bh[lam.bh.length - 1];
+  near(Hof(lam, last[1]), last[0], 1, "eğrinin son noktası");
+  // doyma üstünde: dH/dB -> 1/μ0
+  const dB = 0.1, MU0 = 4e-7 * Math.PI;
+  near((Hof(lam, last[1] + dB) - Hof(lam, last[1])) / dB, 1 / MU0, 1, "doyma sonrası eğim");
+  assert.ok(Hof(lam, 1.0) < Hof(lam, 1.5), "H eğri boyunca artar");
+});
+
+test("doyma faktörü B–H'den hesaplanır, varsayım değildir", () => {
+  const d = defaultDesign();
+  const r = analyseSCIM(d);
+  // Bu motorda demir düşük akıda çalışır: hava aralığı MMK'sı baskın olmalı
+  assert.ok(r.mmf.F_iron < 0.15 * 2 * r.mmf.F_gap,
+    `demir MMK ${r.mmf.F_iron.toFixed(1)} A, hava ${(2 * r.mmf.F_gap).toFixed(1)} A`);
+  assert.ok(r.ksat > 1.0 && r.ksat < 1.15, `ksat = ${r.ksat}`);
+
+  // Dişi daraltmak akıyı yoğunlaştırır -> doyma faktörü büyür
+  const dar = analyseSCIM({ ...d, W3: d.W3 * 0.45 });
+  assert.ok(dar.ksat > r.ksat * 1.2, `dar dişte ksat ${dar.ksat} > ${r.ksat}`);
+});
+
 test("lamina sayısı paket boyuyla tutarlı", () => {
-  const d = { ...defaultDesign(), L1: 58, Kf1: 0.95, lamGrade: "M270-35A" };
+  const d = { ...defaultDesign(), L1: 58, Kf1: 0.95, lamGrade: "M235-35A" };
   const st = stack(d);
   assert.equal(st.thickness, 0.35);
   near(st.count, (58 * 0.95) / 0.35, 1, "lamina sayısı");

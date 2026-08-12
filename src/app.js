@@ -2,6 +2,7 @@ import {
   defaultDesign, defaultSPM, geometry, cageGeometry, winding,
   analyseAny, checksAny, toPyleecanAny, nameplate, PHASES,
   MATERIALS, CAGE_MATERIALS, goodRotorSlots, optimisedDesign,
+  LAMINATIONS, Hof, specificLoss, lamOf,
 } from "./motor.js";
 import { buildParts, createViewer } from "./view3d.js";
 
@@ -128,7 +129,7 @@ const groupsFor = (d) => (d.type === "scim" ? GROUPS_SCIM : GROUPS_SPM);
 
 /* Üretim seçimleri: liste hâlinde seçilenler ve açık/kapalı anahtarlar */
 const CHOICES = [
-  { key: "lamGrade", label: "Silisli sac", opts: () => Object.keys(MATERIALS.laminations) },
+  { key: "lamGrade", label: "Silisli sac", opts: () => Object.keys(LAMINATIONS) },
   { key: "cageMat", label: "Rotor kafesi", opts: () => Object.keys(CAGE_MATERIALS) },
   { key: "RrMode", label: "Rotor direnci kaynağı",
     opts: () => ["manual", "geometri"],
@@ -332,6 +333,54 @@ function drawSection(r) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Malzeme eğrileri: B(H) ve özgül kayıp
+ * ------------------------------------------------------------------ */
+function drawXY(pts, marks, logX = false) {
+  // Bozuk geometride akı yoğunlukları sonsuza gidebilir; eksenleri koru.
+  const fin = (v, alt = 0) => (Number.isFinite(v) ? v : alt);
+  pts = pts.filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+  marks = marks.filter((m) => Number.isFinite(m.x) && Number.isFinite(m.y));
+  if (!pts.length) pts = [[0, 0], [1, 1]];
+
+  const W = 320, H = 168, pad = { l: 38, r: 10, t: 8, b: 26 };
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img",
+    "aria-label": "eğri" });
+  const add = (t, a) => { const e = svgEl(t, a); svg.appendChild(e); return e; };
+
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  const x0 = logX ? Math.max(1, Math.min(...xs)) : 0;
+  const x1 = Math.max(x0 * 1.01, Math.max(...xs));
+  const y1 = Math.max(1e-6, fin(Math.max(...ys, ...marks.map((m) => m.y)), 1)) * 1.08;
+  const tx = (v) => logX
+    ? Math.log(Math.max(x0, v) / x0) / Math.log(x1 / x0)
+    : v / x1;
+  const X = (v) => pad.l + (W - pad.l - pad.r) * Math.min(1, Math.max(0, tx(v)));
+  const Y = (v) => H - pad.b - (H - pad.t - pad.b) * Math.min(1, Math.max(0, v / y1));
+
+  for (let i = 0; i <= 4; i++) {
+    const v = (y1 * i) / 4;
+    add("line", { x1: pad.l, x2: W - pad.r, y1: Y(v), y2: Y(v), class: "grid" });
+    add("text", { x: pad.l - 4, y: Y(v) + 3, class: "tick", "text-anchor": "end" })
+      .textContent = v >= 100 ? v.toFixed(0) : v.toFixed(v < 10 ? 1 : 0);
+  }
+  const xticks = logX
+    ? [x0, Math.sqrt(x0 * x1), x1]
+    : [0, x1 / 2, x1];
+  for (const v of xticks)
+    add("text", { x: X(v), y: H - 8, class: "tick", "text-anchor": "middle" })
+      .textContent = v >= 1000 ? (v / 1000).toFixed(0) + "k" : v.toFixed(v < 10 ? 1 : 0);
+  add("path", { d: pts.map((p, i) => `${i ? "L" : "M"} ${X(p[0]).toFixed(2)} ${Y(p[1]).toFixed(2)}`).join(" "),
+    class: "curve" });
+
+  for (const m of marks) {
+    add("line", { x1: X(m.x), x2: X(m.x), y1: Y(0), y2: Y(m.y), class: "markline" });
+    add("circle", { cx: X(m.x), cy: Y(m.y), r: 3.2, class: `pt-${m.cls}` });
+    add("text", { x: X(m.x) + 5, y: Y(m.y) - 5, class: "pointlbl" }).textContent = m.label;
+  }
+  return svg;
+}
+
+/* ------------------------------------------------------------------ *
  * Moment / devir eğrisi
  * ------------------------------------------------------------------ */
 function drawCurve(r) {
@@ -424,6 +473,15 @@ document.getElementById("app").innerHTML = `
 <section id="sec-plate" hidden><h2>Etiket karşılaştırması</h2><div class="card">
   <div class="rows" id="plate"></div>
   <p class="note">Sol sütun modelin hesabı, sağ sütun dokümandaki değer.</p>
+</div></section>
+
+<section id="sec-mat" hidden><h2>Silisli sac</h2><div class="card">
+  <div class="rows" id="matinfo"></div>
+  <div class="matcharts">
+    <figure><figcaption>Mıknatıslanma eğrisi · B (T) / H (A·m⁻¹)</figcaption><div id="bhchart"></div></figure>
+    <figure><figcaption id="losscap">Özgül kayıp</figcaption><div id="losschart"></div></figure>
+  </div>
+  <p class="note" id="matnote"></p>
 </div></section>
 
 <section id="sec-slots" hidden><h2>Oluk kombinasyonu</h2><div class="card">
@@ -787,6 +845,58 @@ function render() {
       e.appendChild(v);
       return e;
     }));
+  }
+
+  // --- Silisli sac: özellikler ve eğriler ---
+  const matSec = document.getElementById("sec-mat");
+  matSec.hidden = !isSCIM;
+  if (isSCIM) {
+    const lam = lamOf(D);
+    const rows = [
+      ["Kalite", D.lamGrade, ""],
+      ["Açıklama", lam.desc, ""],
+      ["Sac kalınlığı", fx(lam.t, 2), "mm"],
+      ["Lamina sayısı", fx(r.pack.count, 0), "adet"],
+      ["Yoğunluk", fx(lam.rho, 0), "kg/m³"],
+      ["B–H eğrisi", `${lam.bh.length} nokta, ${lam.bh[lam.bh.length - 1][1].toFixed(2)} T'ye kadar`, ""],
+      ["Kayıp verisi", lam.loss
+        ? `ölçülen, ${Object.keys(lam.loss).length} frekans (${Object.keys(lam.loss)[0]}–${
+            Object.keys(lam.loss).slice(-1)[0]} Hz)`
+        : "yok — Steinmetz çıkarımı", ""],
+      ["Diş kaybı", fx(r.iron.pT, 1), "W/kg"],
+      ["Boyunduruk kaybı", fx(r.iron.pY, 1), "W/kg"],
+      ["Doyma faktörü ksat", fx(r.ksat, 3), ""],
+      ["MMK — hava aralığı", fx(2 * r.mmf.F_gap, 1), "A"],
+      ["MMK — demir", fx(r.mmf.F_iron, 2), "A"],
+    ];
+    document.getElementById("matinfo").replaceChildren(...rows.map(([n, v, u]) => {
+      const e = el("div", "row");
+      e.appendChild(el("div", "n", n));
+      const val = el("div", "v");
+      val.innerHTML = `${v}${u ? ` <span>${u}</span>` : ""}`;
+      e.appendChild(val);
+      return e;
+    }));
+
+    document.getElementById("bhchart").replaceChildren(drawXY(
+      lam.bh, [
+        { x: Hof(lam, r.Bt), y: r.Bt, cls: "op", label: "diş" },
+        { x: Hof(lam, r.By), y: r.By, cls: "peak", label: "boyunduruk" },
+      ], true));
+
+    const fOp = D.freq;
+    const lossPts = [];
+    for (let B = 0.1; B <= 1.8001; B += 0.05) lossPts.push([B, specificLoss(lam, B, fOp)]);
+    document.getElementById("losschart").replaceChildren(drawXY(
+      lossPts, [
+        { x: r.Bt, y: r.iron.pT, cls: "op", label: "diş" },
+        { x: r.By, y: r.iron.pY, cls: "peak", label: "boyunduruk" },
+      ]));
+    document.getElementById("losscap").textContent = `Özgül kayıp @ ${fOp} Hz · W·kg⁻¹ / B (T)`;
+    document.getElementById("matnote").textContent = lam.loss
+      ? "Kayıp eğrisi ölçülen veriden ara değerlendirilir (frekansta log-log). " +
+        "Doyma faktörü B–H eğrisinden manyeto-motor kuvvet dengesiyle hesaplanır — varsayım değildir."
+      : "Bu grade için ölçülen kayıp verisi yok; Steinmetz çıkarımı kullanılıyor.";
   }
 
   // --- Oluk kombinasyonu kuralları ---

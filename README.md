@@ -44,9 +44,20 @@ Veri modeli [Pyleecan](https://github.com/Eomys/pyleecan) (Apache-2.0) sınıf
 - Hava aralığı, diş, stator ve rotor boyunduruğu akı yoğunlukları
 - Doyma sınırlarına göre uyarı üretimi
 
+**Silisli sac kütüphanesi — ölçülmüş veri**
+- `src/laminations.js`: Pyleecan malzeme kütüphanesinden (Apache-2.0) alınan
+  gerçek veri — grade başına **B–H eğrisi** ve **çok frekanslı ölçülmüş kayıp
+  yüzeyi**. Dört gradede 400 Hz ölçümü var; HF-10X 10 kHz'e kadar gidiyor.
+- **Demir kaybı ölçülen yüzeyden** ara değerlendirilir (B'de doğrusal,
+  frekansta log-log) — 50 Hz'den Steinmetz çıkarımı yapılmaz. Fark küçük
+  değildir: M400-50A'da 400 Hz / 1,0 T ölçülen 35,9 W/kg, çıkarım 40,2.
+- **Doyman faktörü B–H eğrisinden hesaplanır**, varsayılmaz: bir kutup çifti
+  boyunca 2 hava aralığı + 2 stator dişi + 2 rotor dişi + boyunduruklar için
+  manyeto-motor kuvvet dengesi kurulur ve Xm ile yinelemeli çözülür.
+- Arayüzde ayrı **Silisli sac** bölümü: B–H ve kayıp eğrileri, üzerinde diş
+  ve boyunduruk çalışma noktaları işaretli; MMK dökümü.
+
 **Üretim seçimleri (asenkron)**
-- Silisli sac kataloğu: 0,10 / 0,20 / 0,35 / 0,50 mm ve CoFe; demir kaybı
-  histerezis ve girdap bileşenlerine ayrılır, lamina sayısı hesaplanır
 - Kafes malzemesi ve üretim biçimi: alüminyum/bakır × döküm/çubuk. Rotor
   direnci çubuk + kısa devre halkası geometrisinden hesaplanabilir
 - Derin çubuk (deri) etkisi: kalkışta direnç artışı, nominalde etkisiz
@@ -111,6 +122,17 @@ motor üzerinde kumpasla ölçülerek** düzeltilmiştir
 | Hava aralığı | 0,30 mm | 0,29 (66 − 65,42)/2 |
 | Rotor paketi boyu | (aktif) 58 mm | 64,08 mm |
 | Rotor + mil toplam boy | — | 117,14 mm |
+
+**Oluk profili çıkarımdır.** Dokümanda diş genişliği ve oluk derinliği yoktu.
+İki kısıtla çözüldü: net oluk alanı 17,155 mm² ve etiketteki güç faktörü
+0,720. Çözüm **açık oluk** veriyor — ağız genişliği oluk üst genişliğine eşit
+(diş 1,57 mm, derinlik 5,32 mm, ağız 2,93 mm). Doğrulanması gereken tek
+geometri budur.
+
+Bu çıkarım, doyma faktörü B–H eğrisinden hesaplanmaya başladıktan sonra
+zorunlu hâle geldi: gerçek ksat 1,04 çıkıyor (demir MMK'sı hava aralığının
+yalnızca %3,4'ü), oysa model daha önce 1,3 varsayıyordu. Aradaki fark
+Carter katsayısından, yani oluk ağzından geliyordu.
 
 **Önemli düzeltme:** dokümandaki "rotor iç çapı 44 mm" ifadesi ilk başta mil
 çapı sanılmıştı. Fotoğrafta mil, paket yüzünde bile rotor çapının dörtte biri

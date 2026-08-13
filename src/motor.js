@@ -162,6 +162,13 @@ export function defaultDesign() {
     coolCoef: 60,          // gövde ısı taşınım katsayısı [W/m²K]
     coolFinFactor: 1.8,    // kanat/gövde ile artan yüzey çarpanı
     balanceGrade: 2.5,     // ISO 21940 kalite sınıfı (teklifte G2.5)
+    balanceRpm: 6000,      // balans devri (teklifte 6.000 d/dk)
+    impreg: "Daldırma vernik",   // emprenye yöntemi (yanan motorda VPI yok)
+    linerT: 0.25,          // oluk astarı + tel-cidar boşluğu [mm]
+    cutMethod: "Kalıp (stampa)", // sac kesim yöntemi
+    anneal: false,         // gerilim giderme tavı
+    hallRing: false,       // mil üzerinde Hall mıknatıs halkası
+    hallOD: 24, hallID: 12, hallL: 6,
 
     // --- Üretim seçimleri ---
     Ksfill: 0.417,               // oluk bakır doluluk oranı
@@ -305,6 +312,11 @@ export function quotedDesign() {
     cageMat: "Bakır çubuk",
     RrMode: "geometri",     // doküman Rr'si alüminyum kafese aitti
     insulClass: "H",
+    cutMethod: "Lazer",     // adım 2: lazer kesim, kalıp yok
+    anneal: false,          // teklifte tav adımı YOK — eklenmesi gereken şey
+    impreg: "VPI epoksi",   // adım 4: vakum-basınç emprenye, 200 °C kür
+    balanceRpm: 6000,       // adım 9: G2.5 @ 6.000 d/dk
+    hallRing: true,         // adım 8: mil üzerine NdFeB mıknatıs dizimi
   };
 }
 
@@ -663,11 +675,44 @@ export function stack(d) {
  * Girdap terimi sac kalınlığının karesiyle orantılıdır; katalog p15
  * değeri zaten o kalınlığa ait olduğu için ayrıca ölçeklenmez.
  */
-export function ironLoss(d, B_tooth, B_yoke, m_tooth, m_yoke) {
+/**
+ * Kesim yöntemleri ve kesme kenarı hasarı.
+ *
+ * Her kesim, kenardan içeri doğru `delta` derinliğinde bir bölgede tane
+ * yapısını ve kalıntı gerilmeyi bozar; o bölgenin özgül kaybı `mult` katına
+ * çıkar. Etki, parçanın GENİŞLİĞİNE göre ölçeklenir — dar dişlerde hasarlı
+ * bölge kesitin önemli bir kısmını kaplar, geniş boyundurukta ihmal edilir.
+ *
+ * Lazer, kalıptan daha derin bir ısıdan etkilenen bölge bırakır. Gerilim
+ * giderme tavı (750–800 °C) hasarı büyük ölçüde geri alır.
+ *
+ * Kaynak mertebeleri: kesme kenarı bölgesinde kayıp artışı 2–3 kat;
+ * kalıpta ~0,1 mm, lazerde ~0,2 mm etkilenen derinlik.
+ */
+export const CUT_METHODS = {
+  "Kalıp (stampa)": { delta: 0.10, mult: 2.5, note: "Seri üretim kalıbı. Kenar hasarı en az, ama kalıp yatırımı yüksek." },
+  "Lazer": { delta: 0.20, mult: 2.5, note: "Prototip için ideal, kalıp gerekmez. Isıdan etkilenen bölge kalıbın iki katı." },
+  "Tel erozyon": { delta: 0.02, mult: 2.5, note: "Neredeyse hasarsız, ama çok yavaş — tek parça numune için." },
+};
+
+/**
+ * Kesim kaynaklı kayıp çarpanı. `width` parçanın dar boyutudur (diş
+ * genişliği ya da boyunduruk kalınlığı); iki kenardan hasar alır.
+ */
+export function buildFactor(d, width) {
+  const cm = CUT_METHODS[d.cutMethod] ?? CUT_METHODS["Lazer"];
+  if (d.anneal) return { k: 1.03, cm, frac: 0 };            // tav sonrası artık etki
+  const frac = Math.min(1, (2 * cm.delta) / Math.max(1e-9, width));
+  return { k: 1 + (cm.mult - 1) * frac, cm, frac };
+}
+
+export function ironLoss(d, B_tooth, B_yoke, m_tooth, m_yoke, wTooth, wYoke) {
   const lam = lamOf(d);
   const f = d.freq ?? 50;
-  const pT = specificLoss(lam, B_tooth, f);
-  const pY = specificLoss(lam, B_yoke, f);
+  const bfT = buildFactor(d, wTooth ?? d.W3);
+  const bfY = buildFactor(d, wYoke ?? d.W3 * 3);
+  const pT = specificLoss(lam, B_tooth, f) * bfT.k;
+  const pY = specificLoss(lam, B_yoke, f) * bfY.k;
   const teeth = pT * m_tooth, yoke = pY * m_yoke;
 
   // Bileşen ayrımı yalnızca gösterim içindir: ölçülen toplam, aynı noktadaki
@@ -681,6 +726,9 @@ export function ironLoss(d, B_tooth, B_yoke, m_tooth, m_yoke) {
     Ph, Pe: teeth + yoke - Ph, total: teeth + yoke,
     teeth, yoke, pT, pY, lam,
     measured: !!lam.loss,
+    build: bfT, buildYoke: bfY,
+    // tavsız/tavlı fark: kesim seçiminin bedeli
+    ideal: (pT / bfT.k) * m_tooth + (pY / bfY.k) * m_yoke,
   };
 }
 
@@ -704,7 +752,37 @@ export const INSULATION = {
  * denge kurar. Amacı soğutmanın hangi mertebede olması gerektiğini
  * göstermektir.
  */
-export function thermal(d, Ploss) {
+/**
+ * Oluk dolgusu — sargıdan sac paketine giden ısı yolunun eşdeğer iletkenliği.
+ *
+ * Sargı ile diş arasında yalıtım astarı, tel emayesi ve teller arası boşluk
+ * vardır. Daldırma vernikte boşluklar HAVA ile doludur (k≈0,026) ve bu
+ * yol, sargı sıcak noktasını gövde sıcaklığının çok üzerine çıkarır.
+ * VPI'de (vakum-basınç emprenye) boşluklar epoksiyle dolar.
+ */
+export const IMPREG = {
+  "Yok (kuru)":     { k: 0.08, note: "Yalnız emaye. Teller arası hava; ısı iletimi en kötü." },
+  "Daldırma vernik": { k: 0.16, note: "Vernik banyosu. Oluk derinliklerine tam nüfuz etmez." },
+  "VPI epoksi":     { k: 0.55, note: "Vakum-basınç emprenye, fırında kür. Boşluklar dolar; mekanik olarak da tek parça." },
+};
+
+/**
+ * Sargı sıcak noktası — oluk cidarı üzerinden iletim.
+ * Bakır kaybı, oluk duvarı alanından eşdeğer dolgu kalınlığı boyunca akar.
+ */
+export function slotHotSpot(d, Pcus) {
+  const mm = 1e-3;
+  const imp = IMPREG[d.impreg] ?? IMPREG["VPI epoksi"];
+  // Oluk duvarı çevresi (yaklaşık dikdörtgen oluk) × paket boyu × oluk sayısı
+  const per = (2 * d.H2 + d.W3) * mm;
+  const A = d.Zs * per * (d.L1 * mm);
+  // Eşdeğer kalınlık: astar + tel-cidar boşluğu
+  const t = (d.linerT ?? 0.25) * mm;
+  const dT = (Pcus * t) / Math.max(1e-9, imp.k * A);
+  return { dT, A, imp, t };
+}
+
+export function thermal(d, Ploss, Pcus = 0) {
   const mm = 1e-3;
   const R = d.Rext * mm, L = d.L1 * mm;
   const areaBare = 2 * Math.PI * R * L + 2 * Math.PI * R * R;   // silindir + iki uç
@@ -716,9 +794,18 @@ export function thermal(d, Ploss) {
   const rise = riseAt(d.coolCoef ?? 25);
   const hNeeded = Ploss / Math.max(1e-9, area * cls.rise);      // gereken h
 
+  // Sargı sıcak noktası gövdenin de üzerindedir: oluk dolgusundan geçen
+  // bakır kaybı ek bir sıcaklık farkı yaratır.
+  const slot = slotHotSpot(d, Pcus);
+  const body = (d.ambient ?? 40) + rise;
+  const hot = body + slot.dT;
+  // Sınıf sınırını sıcak noktanın karşılaması için gereken taşınım katsayısı
+  const hNeededHot = Ploss / Math.max(1e-9, area * Math.max(1e-9, cls.rise - slot.dT));
+
   return {
     area, areaBare, fluxDens, rise, hNeeded, cls,
-    hot: (d.ambient ?? 40) + rise,
+    slot, body, hot, hNeededHot,
+    hotOk: hot <= cls.limit,
     ok: rise <= cls.rise,
     // karşılaştırma için tipik taşınım katsayıları
     scale: [
@@ -736,7 +823,7 @@ export function thermal(d, Ploss) {
  * G sınıfı: e_izin × Ω = G  (G [mm/s], e [mm], Ω [rad/s])
  */
 export function balance(d, mRotor, rpm) {
-  const omega = (TAU * rpm) / 60;
+  const omega = (TAU * (d.balanceRpm || rpm)) / 60;
   const e_mm = (d.balanceGrade ?? 2.5) / Math.max(1e-9, omega);  // izin verilen eksantriklik [mm]
   const U = e_mm * 1000 * mRotor;                               // artık balanssızlık [g·mm]
   const force = mRotor * e_mm * mm2m(1) * omega * omega;         // dönen kuvvet [N]
@@ -746,8 +833,60 @@ export function balance(d, mRotor, rpm) {
     U_gmm: U,
     U_perPlane: U / 2,
     force,
+    rpm: d.balanceRpm || rpm,
+    mass: mRotor,
     gapRatio: (e_mm / Math.max(1e-9, d.gap)) * 100,              // hava aralığının yüzdesi
   };
+}
+
+/**
+ * Hall sensörü için mil üzerindeki NdFeB mıknatıs halkası.
+ * Konum geri beslemesi sürücü için gereklidir; balans ve atalet
+ * hesabına dönen kütle olarak girer.
+ */
+export function hallRing(d) {
+  if (!d.hallRing) return { mass: 0, J: 0, poles: 0 };
+  const mm = 1e-3;
+  const ro = (d.hallOD ?? 24) / 2 * mm, ri = (d.hallID ?? 12) / 2 * mm;
+  const L = (d.hallL ?? 6) * mm;
+  const m = Math.PI * (ro ** 2 - ri ** 2) * L * MATERIALS.magnet.rho;
+  return { mass: m, J: 0.5 * m * (ro ** 2 + ri ** 2), poles: 2 * d.p, ro, ri, L };
+}
+
+/**
+ * MIL-STD-704 (400 Hz uçak elektrik sistemi) kalıcı hâl besleme zarfı.
+ *
+ * Motor NOMİNAL noktada değil, zarfın KÖŞELERİNDE de görevini yapmak
+ * zorundadır. İki köşe belirleyicidir:
+ *   - alt gerilim / üst frekans : en düşük V/f → moment kapasitesi en az
+ *   - üst gerilim / alt frekans : en yüksek V/f → akı en yüksek, doyma riski
+ */
+export const MIL704 = { Vmin: 108, Vnom: 115, Vmax: 118, fmin: 393, fnom: 400, fmax: 407 };
+
+export function supplyEnvelope(d, Trated) {
+  const nomLN = d.connection === "delta" ? d.Vline / Math.sqrt(3) : d.Vline / Math.sqrt(3);
+  const at = (Vln, f) => {
+    const dd = { ...d, Vline: d.Vline * (Vln / nomLN), freq: f };
+    const ns = (120 * f) / (2 * dd.p);
+    // İstenen momenti veren devri ara
+    let a = 1, b = ns - 1;
+    for (let i = 0; i < 40; i++) {
+      const m = (a + b) / 2;
+      analyseSCIM({ ...dd, speed: m }).T > Trated ? (a = m) : (b = m);
+    }
+    const r = analyseSCIM({ ...dd, speed: (a + b) / 2 });
+    return { V: Vln, f, r, ns, canHold: r.peakT > Trated * 1.1 };
+  };
+  const corners = [
+    { name: "Nominal", ...at(MIL704.Vnom, MIL704.fnom) },
+    { name: "En düşük V/f (108 V, 407 Hz)", ...at(MIL704.Vmin, MIL704.fmax) },
+    { name: "En yüksek V/f (118 V, 393 Hz)", ...at(MIL704.Vmax, MIL704.fmin) },
+    { name: "Alt gerilim (108 V, 400 Hz)", ...at(MIL704.Vmin, MIL704.fnom) },
+  ];
+  const worstT = corners.reduce((a, b) => (b.r.peakT < a.r.peakT ? b : a));
+  const worstB = corners.reduce((a, b) => (b.r.Bt > a.r.Bt ? b : a));
+  const worstL = corners.reduce((a, b) => (b.r.Ploss > a.r.Ploss ? b : a));
+  return { corners, worstT, worstB, worstL, nomLN, Trated };
 }
 const mm2m = (x) => x * 1e-3;
 
@@ -785,7 +924,7 @@ export function acceptanceTests(d, r) {
   }
   const rated = analyseSCIM({ ...d, speed: (a + b) / 2 });
 
-  const th = thermal(d, rated.Ploss);
+  const th = thermal(d, rated.Ploss, rated.Pcus + rated.Pcur);
   const bal = balance(d, r.mass.rotating, rated.ns * (1 - rated.s));
 
   return { Rph20, Rterm, noLoad, rated, hipot, th, bal, wye, Trated };
@@ -1141,11 +1280,14 @@ export function analyseSCIM(d) {
   };
   mass.steel = mass.statorSteel + mass.rotorSteel;
   // Balans, dönen kütlelerin tamamı üzerinden yapılır
-  mass.rotating = mass.rotorSteel + mass.cage + mass.shaft;
+  const hall = hallRing(d);
+  mass.hall = hall.mass;
+  mass.rotating = mass.rotorSteel + mass.cage + mass.shaft + hall.mass;
   mass.total = mass.steel + mass.copper + mass.cage + mass.shaft;
 
   // --- Demir kaybı: sac kalitesinin ÖLÇÜLEN kayıp yüzeyinden ---
-  const iron = ironLoss(d, Bt, By, V_teeth * lam.rho, V_yoke * lam.rho);
+  const iron = ironLoss(d, Bt, By, V_teeth * lam.rho, V_yoke * lam.rho,
+                        d.W3, d.Rext - g.r3);
   const Pfe = iron.total;
   const pack = stack(d);
 
@@ -1164,7 +1306,7 @@ export function analyseSCIM(d) {
     fill, J, Jbar, Ibar, A_wire, mass, curve,
     peakT: peak.T, peakS: peak.s, peakN: peak.n,
     Tstart: start.T, Ilr: start.I1,
-    iron, pack, cageR, Rr0, Xlr0, statR, Rs0: dEff.Rs, Wwire_eq,
+    iron, pack, hall, cageR, Rr0, Xlr0, statR, Rs0: dEff.Rs, Wwire_eq,
     ksat, mmf, lam,
     fillMax: fillCeiling(d), leak: lk,
     skinStart: skinFactors(d, 1), skinRated: skinFactors(d, s),

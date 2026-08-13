@@ -2,7 +2,7 @@ import {
   defaultDesign, defaultSPM, geometry, cageGeometry, winding,
   analyseAny, checksAny, toPyleecanAny, nameplate, PHASES,
   MATERIALS, CAGE_MATERIALS, goodRotorSlots, optimisedDesign, design115V, quotedDesign,
-  acceptanceTests, INSULATION,
+  acceptanceTests, INSULATION, IMPREG, CUT_METHODS, MIL704, supplyEnvelope,
   LAMINATIONS, Hof, specificLoss, lamOf,
 } from "./motor.js";
 import { buildParts, createViewer } from "./view3d.js";
@@ -132,6 +132,8 @@ const GROUPS_SCIM = [
       ["coolFinFactor", "Gövde yüzey çarpanı", 1, 4, 0.1, ""],
       ["ambient", "Ortam sıcaklığı", -40, 80, 5, "°C"],
       ["balanceGrade", "Balans sınıfı G", 0.4, 16, 0.1, "mm/s"],
+      ["balanceRpm", "Balans devri", 1000, 12000, 100, "d/dk"],
+      ["linerT", "Oluk astarı kalınlığı", 0.1, 0.8, 0.05, "mm"],
     ],
   },
 ];
@@ -142,6 +144,8 @@ const CHOICES = [
   { key: "lamGrade", label: "Silisli sac", opts: () => Object.keys(LAMINATIONS) },
   { key: "cageMat", label: "Rotor kafesi", opts: () => Object.keys(CAGE_MATERIALS) },
   { key: "insulClass", label: "Yalıtım sınıfı", opts: () => Object.keys(INSULATION) },
+  { key: "cutMethod", label: "Sac kesim yöntemi", opts: () => Object.keys(CUT_METHODS) },
+  { key: "impreg", label: "Emprenye", opts: () => Object.keys(IMPREG) },
   { key: "RrMode", label: "Rotor direnci kaynağı",
     opts: () => ["manual", "geometri"],
     text: { manual: "Doküman değeri", geometri: "Geometriden hesapla" } },
@@ -149,6 +153,8 @@ const CHOICES = [
 const TOGGLES = [
   ["rotorClosed", "Kapalı rotor oluğu"],
   ["skinEffect", "Derin çubuk (deri) etkisi"],
+  ["anneal", "Gerilim giderme tavı"],
+  ["hallRing", "Hall mıknatıs halkası (mil üzeri)"],
 ];
 
 /* ------------------------------------------------------------------ *
@@ -496,6 +502,12 @@ document.getElementById("app").innerHTML = `
   <div class="rows" id="accept"></div>
   <p class="note">Beklenen değerler; tedarikçinin test föyüyle karşılaştırmak içindir.
   Sıcaklık artışı tek gövde yüzeyi üzerinden kaba bir dengedir, ısıl ağ çözümü değildir.</p>
+</div></section>
+
+<section id="sec-env" hidden><h2>Besleme zarfı ve üretim etkileri</h2><div class="card">
+  <div class="rows" id="env"></div>
+  <p class="note">MIL-STD-704 kalıcı hâl zarfı: 108–118 V, 393–407 Hz. Motor nominal
+  noktada değil, zarfın köşelerinde de nominal momenti vermek zorundadır.</p>
 </div></section>
 
 <section id="sec-mat" hidden><h2>Silisli sac</h2><div class="card">
@@ -929,11 +941,17 @@ function render() {
       [`İzin verilen artış (${D.insulClass})`, fx(t.th.cls.rise, 0), "K", null],
       ["Gereken taşınım katsayısı", fx(t.th.hNeeded, 0), "W/m²K", null],
       [`Seçilen h = ${fx(D.coolCoef, 0)} ile artış`, fx(t.th.rise, 0), "K", sev(t.th.ok)],
-      ["Tahmini sargı sıcaklığı", fx(t.th.hot, 0), "°C", sev(t.th.hot <= t.th.cls.limit)],
+      [`Oluk dolgusu (${D.impreg})`, fx(t.th.slot.imp.k, 2), "W/mK", null],
+      ["Sargı–sac sıcaklık farkı", fx(t.th.slot.dT, 1), "K", null],
+      ["Gövde sıcaklığı", fx(t.th.body, 0), "°C", null],
+      ["Sargı sıcak noktası", fx(t.th.hot, 0), "°C", sev(t.th.hotOk)],
+      ["Sıcak nokta için gereken h", fx(t.th.hNeededHot, 0), "W/m²K", null],
 
       ["— Balans (adım 9)", "", "", null],
       [`ISO 21940 G${t.bal.grade}`, fx(t.bal.e_um, 2), "µm", null],
+      [`Balans devri`, fx(t.bal.rpm, 0), "d/dk", null],
       ["Dönen kütle", fx(r.mass.rotating, 3), "kg", null],
+      ...(D.hallRing ? [["  — bunun Hall halkası", fx(r.mass.hall * 1000, 0), "g", null]] : []),
       ["Artık balanssızlık / düzlem", fx(t.bal.U_perPlane, 2), "g·mm", null],
       ["Hava aralığına oranı", fx(t.bal.gapRatio, 1), "%", sev(t.bal.gapRatio < 10)],
     ];
@@ -944,6 +962,51 @@ function render() {
       const val = el("div", "v");
       val.innerHTML = `${v}${u ? ` <span>${u}</span>` : ""}` +
         (lvl ? ` <b data-l="${lvl}">${lvl === "ok" ? "uygun" : "sınır aşıldı"}</b>` : "");
+      e.appendChild(val);
+      return e;
+    }));
+  }
+
+  // --- Besleme zarfı (MIL-STD-704) ve üretim etkileri ---
+  const envSec = document.getElementById("sec-env");
+  envSec.hidden = !isSCIM;
+  if (isSCIM) {
+    const Trated = D.plate?.T ?? r.T;
+    const env = supplyEnvelope(D, Trated);
+    const sev = (ok) => (ok ? "ok" : "crit");
+    const bf = r.iron.build;
+    const rows = [
+      ["— MIL-STD-704 zarf köşeleri", "", "", null],
+      ...env.corners.map((c) => [
+        c.name,
+        `${fx(c.r.peakT, 2)} N·m dev. · ${fx(c.r.I1, 2)} A · ${fx(c.r.eta * 100, 1)} %`,
+        "", sev(c.canHold),
+      ]),
+      ["Momenti en zorlayan köşe", env.worstT.name, "", null],
+      ["Devrilme momenti / nominal", fx(env.worstT.r.peakT / Trated, 2), "×",
+        sev(env.worstT.r.peakT / Trated >= 1.6)],
+      ["Akının en yüksek olduğu köşe", `${env.worstB.name} · ${fx(env.worstB.r.Bt, 2)} T`,
+        "", sev(env.worstB.r.Bt < 1.7)],
+      ["En yüksek kayıp (ısıl tasarım noktası)", fx(env.worstL.r.Ploss, 0), "W", null],
+
+      ["— Sac kesimi (adım 2)", "", "", null],
+      ["Yöntem", `${D.cutMethod}${D.anneal ? " + tav" : ""}`, "", null],
+      ["Etkilenen kenar derinliği", fx(bf.cm.delta, 2), "mm", null],
+      ["Diş kesitinde hasarlı pay", fx(bf.frac * 100, 0), "%", null],
+      ["Demir kaybı çarpanı", fx(bf.k, 3), "×", sev(bf.k < 1.2)],
+      ["Kesim kaynaklı ek kayıp", fx(r.iron.total - r.iron.ideal, 1), "W", null],
+
+      ["— Emprenye (adım 4)", "", "", null],
+      ["Yöntem", D.impreg, "", null],
+      ["Eşdeğer ısı iletimi", fx(r.iron.lam ? IMPREG[D.impreg].k : 0, 2), "W/mK", null],
+    ];
+    document.getElementById("env").replaceChildren(...rows.map(([n, v, u, lvl]) => {
+      if (!v) { const h = el("div", "row grouphead"); h.appendChild(el("div", "n", n)); return h; }
+      const e = el("div", "row");
+      e.appendChild(el("div", "n", n));
+      const val = el("div", "v");
+      val.innerHTML = `${v}${u ? ` <span>${u}</span>` : ""}` +
+        (lvl ? ` <b data-l="${lvl}">${lvl === "ok" ? "uygun" : "dikkat"}</b>` : "");
       e.appendChild(val);
       return e;
     }));

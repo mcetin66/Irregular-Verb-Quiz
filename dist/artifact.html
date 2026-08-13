@@ -470,6 +470,43 @@ section.off { display: none; }
   .instrument { position: static; }
   .tabs { top: 0; }
 }
+
+/* ------------------------------------------------------------------ *
+ * Yazılabilir sayı kutusu
+ *
+ * Sürgü keşif içindir, kutu ölçülmüş değeri birebir girmek içindir.
+ * Kutu sürgünün aralığına bağlı değildir; değer aralık dışına çıkarsa
+ * kenarı işaretlenir ve sürgü ucunda durur.
+ * ------------------------------------------------------------------ */
+.ctrl .num { display: flex; align-items: baseline; gap: 4px; }
+.numin {
+  width: 7.5ch; text-align: right;
+  font-family: var(--mono); font-size: 12.5px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink); background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: var(--r);
+  padding: 2px 5px; -moz-appearance: textfield;
+}
+.numin::-webkit-outer-spin-button,
+.numin::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.numin:hover { border-color: var(--ink-3); }
+.numin:focus {
+  outline: none; border-color: var(--copper);
+  box-shadow: inset 0 0 0 1px var(--copper); background: var(--surface);
+}
+.numin.outside { border-color: var(--warn); color: var(--warn); }
+.ctrl .unit { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
+
+/* --- Masaüstü: bu bir PC uygulaması, geniş ekranı kullan --- */
+@media (min-width: 1000px) {
+  .wrap { max-width: 1600px; grid-template-columns: minmax(400px, 30vw) minmax(0, 1fr); }
+}
+@media (min-width: 1500px) {
+  /* Geniş ekranda ayar ızgarası üç sütuna açılır */
+  .ctrls { grid-template-columns: repeat(3, 1fr); }
+  .results { grid-template-columns: repeat(3, 1fr); }
+  .matcharts { grid-template-columns: 1fr 1fr; }
+}
 </style>
 
 <main class="wrap" id="app"></main>
@@ -3340,13 +3377,27 @@ let tab = localStorage.getItem("motor.tab") || "geo";
 if (!TABS.some(([k]) => k === tab)) tab = "geo";
 
 const tabBar = document.getElementById("tabs");
-for (const [key, label] of TABS) {
+TABS.forEach(([key, label], i) => {
   const b = el("button", "tab", label);
+  b.title = `${label} — ${i + 1} tuşu`;
   b.dataset.tab = key;
   b.setAttribute("role", "tab");
   b.onclick = () => { tab = key; localStorage.setItem("motor.tab", key); applyTab(); };
   tabBar.appendChild(b);
-}
+});
+
+/* PC uygulaması: 1-6 tuşlarıyla aşama değiştir. Bir kutuya yazarken
+   devreye girmez. */
+addEventListener("keydown", (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.target;
+  if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) return;
+  const i = "123456".indexOf(e.key);
+  if (i < 0 || i >= TABS.length) return;
+  tab = TABS[i][0];
+  localStorage.setItem("motor.tab", tab);
+  applyTab();
+});
 
 function applyTab() {
   for (const b of tabBar.children)
@@ -3407,17 +3458,36 @@ function buildControls() {
       const c = el("div", "ctrl");
       const lab = el("label", null, label);
       lab.htmlFor = `c-${key}`;
+      // Sayı kutusu SÜRGÜNÜN SINIRLARINA BAĞLI DEĞİLDİR: sürgü keşif içindir,
+      // kutu ise ölçülmüş değeri birebir girmek içindir (ör. 46,115 mm).
+      // Sürgü kendi aralığına kırpar, kutu kırpmaz.
       const num = el("div", "num");
+      const box2 = document.createElement("input");
+      Object.assign(box2, { type: "number", step, value: D[key],
+        id: `n-${key}`, className: "numin" });
+      box2.setAttribute("aria-label", label);
+      const unitEl = el("span", "unit", unit);
+
       const input = document.createElement("input");
       Object.assign(input, { type: "range", id: `c-${key}`, min, max, step, value: D[key] });
-      input.addEventListener("input", () => {
-        D[key] = parseFloat(input.value);
+
+      const commit = (v, from) => {
+        if (!Number.isFinite(v)) return;
+        D[key] = v;
         if (key === "Zs") D.coil_pitch = Math.min(D.coil_pitch, D.Zs);
+        if (from !== "box") box2.value = D[key];
+        if (from !== "slider") input.value = D[key];
         save(); render();
-      });
+      };
+      input.addEventListener("input", () => commit(parseFloat(input.value), "slider"));
+      box2.addEventListener("input", () => commit(parseFloat(box2.value), "box"));
+      // Enter sayfayı göndermek yerine odağı bırakır
+      box2.addEventListener("keydown", (e) => { if (e.key === "Enter") box2.blur(); });
+
+      num.append(box2, unitEl);
       c.append(lab, num, input);
       box.appendChild(c);
-      ctrlEls[key] = { num, input, unit, step };
+      ctrlEls[key] = { num, box: box2, input, unit, step, min, max };
     }
     gEl.appendChild(box);
     into(grp.tab).appendChild(gEl);
@@ -3477,8 +3547,13 @@ function buildControls() {
     el("p", "note", (CUT_METHODS[D.cutMethod]?.note ?? "") + " " + (IMPREG[D.impreg]?.note ?? "")));
 }
 const syncInputs = () => {
-  for (const [k, c] of Object.entries(ctrlEls)) c.input.value = D[k];
+  for (const [k, c] of Object.entries(ctrlEls)) {
+    c.input.value = D[k];
+    c.box.value = trimNum(D[k]);
+  }
 };
+/** Gereksiz sıfırları atar: 46.115 aynen, 48.0 -> 48 */
+const trimNum = (v) => (Number.isFinite(v) ? String(Math.round(v * 1e6) / 1e6) : "");
 
 /* --- Dışa aktarma --- */
 /**
@@ -3675,8 +3750,11 @@ function render() {
 
   // --- Denetim değerleri ---
   for (const [k, c] of Object.entries(ctrlEls)) {
-    const dec = c.step >= 1 ? 0 : c.step >= 0.1 ? 1 : 2;
-    c.num.innerHTML = `${fx(D[k], dec)}${c.unit ? ` <span>${c.unit}</span>` : ""}`;
+    // Kullanıcı yazarken kutuyu ezme; yalnızca odakta değilken tazele
+    if (document.activeElement !== c.box) c.box.value = trimNum(D[k]);
+    // Değer sürgünün aralığı dışındaysa bunu göster
+    c.box.classList.toggle("outside", D[k] < c.min || D[k] > c.max);
+    c.input.value = D[k];
   }
 
   // --- Hayati değerler ---

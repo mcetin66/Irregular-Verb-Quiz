@@ -592,13 +592,27 @@ let tab = localStorage.getItem("motor.tab") || "geo";
 if (!TABS.some(([k]) => k === tab)) tab = "geo";
 
 const tabBar = document.getElementById("tabs");
-for (const [key, label] of TABS) {
+TABS.forEach(([key, label], i) => {
   const b = el("button", "tab", label);
+  b.title = `${label} — ${i + 1} tuşu`;
   b.dataset.tab = key;
   b.setAttribute("role", "tab");
   b.onclick = () => { tab = key; localStorage.setItem("motor.tab", key); applyTab(); };
   tabBar.appendChild(b);
-}
+});
+
+/* PC uygulaması: 1-6 tuşlarıyla aşama değiştir. Bir kutuya yazarken
+   devreye girmez. */
+addEventListener("keydown", (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.target;
+  if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) return;
+  const i = "123456".indexOf(e.key);
+  if (i < 0 || i >= TABS.length) return;
+  tab = TABS[i][0];
+  localStorage.setItem("motor.tab", tab);
+  applyTab();
+});
 
 function applyTab() {
   for (const b of tabBar.children)
@@ -659,17 +673,36 @@ function buildControls() {
       const c = el("div", "ctrl");
       const lab = el("label", null, label);
       lab.htmlFor = `c-${key}`;
+      // Sayı kutusu SÜRGÜNÜN SINIRLARINA BAĞLI DEĞİLDİR: sürgü keşif içindir,
+      // kutu ise ölçülmüş değeri birebir girmek içindir (ör. 46,115 mm).
+      // Sürgü kendi aralığına kırpar, kutu kırpmaz.
       const num = el("div", "num");
+      const box2 = document.createElement("input");
+      Object.assign(box2, { type: "number", step, value: D[key],
+        id: `n-${key}`, className: "numin" });
+      box2.setAttribute("aria-label", label);
+      const unitEl = el("span", "unit", unit);
+
       const input = document.createElement("input");
       Object.assign(input, { type: "range", id: `c-${key}`, min, max, step, value: D[key] });
-      input.addEventListener("input", () => {
-        D[key] = parseFloat(input.value);
+
+      const commit = (v, from) => {
+        if (!Number.isFinite(v)) return;
+        D[key] = v;
         if (key === "Zs") D.coil_pitch = Math.min(D.coil_pitch, D.Zs);
+        if (from !== "box") box2.value = D[key];
+        if (from !== "slider") input.value = D[key];
         save(); render();
-      });
+      };
+      input.addEventListener("input", () => commit(parseFloat(input.value), "slider"));
+      box2.addEventListener("input", () => commit(parseFloat(box2.value), "box"));
+      // Enter sayfayı göndermek yerine odağı bırakır
+      box2.addEventListener("keydown", (e) => { if (e.key === "Enter") box2.blur(); });
+
+      num.append(box2, unitEl);
       c.append(lab, num, input);
       box.appendChild(c);
-      ctrlEls[key] = { num, input, unit, step };
+      ctrlEls[key] = { num, box: box2, input, unit, step, min, max };
     }
     gEl.appendChild(box);
     into(grp.tab).appendChild(gEl);
@@ -729,8 +762,13 @@ function buildControls() {
     el("p", "note", (CUT_METHODS[D.cutMethod]?.note ?? "") + " " + (IMPREG[D.impreg]?.note ?? "")));
 }
 const syncInputs = () => {
-  for (const [k, c] of Object.entries(ctrlEls)) c.input.value = D[k];
+  for (const [k, c] of Object.entries(ctrlEls)) {
+    c.input.value = D[k];
+    c.box.value = trimNum(D[k]);
+  }
 };
+/** Gereksiz sıfırları atar: 46.115 aynen, 48.0 -> 48 */
+const trimNum = (v) => (Number.isFinite(v) ? String(Math.round(v * 1e6) / 1e6) : "");
 
 /* --- Dışa aktarma --- */
 /**
@@ -927,8 +965,11 @@ function render() {
 
   // --- Denetim değerleri ---
   for (const [k, c] of Object.entries(ctrlEls)) {
-    const dec = c.step >= 1 ? 0 : c.step >= 0.1 ? 1 : 2;
-    c.num.innerHTML = `${fx(D[k], dec)}${c.unit ? ` <span>${c.unit}</span>` : ""}`;
+    // Kullanıcı yazarken kutuyu ezme; yalnızca odakta değilken tazele
+    if (document.activeElement !== c.box) c.box.value = trimNum(D[k]);
+    // Değer sürgünün aralığı dışındaysa bunu göster
+    c.box.classList.toggle("outside", D[k] < c.min || D[k] > c.max);
+    c.input.value = D[k];
   }
 
   // --- Hayati değerler ---

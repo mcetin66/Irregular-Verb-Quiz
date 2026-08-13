@@ -467,3 +467,40 @@ section.off { display: none; }
   .instrument { position: static; }
   .tabs { top: 0; }
 }
+
+/* ------------------------------------------------------------------ *
+ * Yazılabilir sayı kutusu
+ *
+ * Sürgü keşif içindir, kutu ölçülmüş değeri birebir girmek içindir.
+ * Kutu sürgünün aralığına bağlı değildir; değer aralık dışına çıkarsa
+ * kenarı işaretlenir ve sürgü ucunda durur.
+ * ------------------------------------------------------------------ */
+.ctrl .num { display: flex; align-items: baseline; gap: 4px; }
+.numin {
+  width: 7.5ch; text-align: right;
+  font-family: var(--mono); font-size: 12.5px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink); background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: var(--r);
+  padding: 2px 5px; -moz-appearance: textfield;
+}
+.numin::-webkit-outer-spin-button,
+.numin::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.numin:hover { border-color: var(--ink-3); }
+.numin:focus {
+  outline: none; border-color: var(--copper);
+  box-shadow: inset 0 0 0 1px var(--copper); background: var(--surface);
+}
+.numin.outside { border-color: var(--warn); color: var(--warn); }
+.ctrl .unit { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
+
+/* --- Masaüstü: bu bir PC uygulaması, geniş ekranı kullan --- */
+@media (min-width: 1000px) {
+  .wrap { max-width: 1600px; grid-template-columns: minmax(400px, 30vw) minmax(0, 1fr); }
+}
+@media (min-width: 1500px) {
+  /* Geniş ekranda ayar ızgarası üç sütuna açılır */
+  .ctrls { grid-template-columns: repeat(3, 1fr); }
+  .results { grid-template-columns: repeat(3, 1fr); }
+  .matcharts { grid-template-columns: 1fr 1fr; }
+}

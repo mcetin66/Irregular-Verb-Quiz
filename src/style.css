@@ -411,3 +411,59 @@ button.act.ghost { background: transparent; color: var(--ink-2); border-color: v
   font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--ink-3);
 }
+
+/* --- Sekmeler: iş akışı aşamaları --- */
+.tabs {
+  display: flex; gap: 2px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  position: sticky; top: 0; z-index: 15;
+  background: var(--bg);
+  margin: 16px 0 0; padding: 0;
+  border-bottom: 1px solid var(--line);
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  flex: 0 0 auto; cursor: pointer; white-space: nowrap;
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
+  text-transform: uppercase; font-weight: 600;
+  padding: 10px 13px 9px; color: var(--ink-3);
+  background: none; border: none; border-bottom: 2px solid transparent;
+}
+.tab:hover { color: var(--ink-2); }
+.tab[aria-selected="true"] { color: var(--copper); border-bottom-color: var(--copper); }
+.tab:focus-visible { outline: 2px solid var(--copper); outline-offset: -2px; }
+
+section.off { display: none; }
+
+@media (min-width: 1000px) {
+  .tabs { margin: 0 0 4px; top: 0; }
+}
+
+/* Dar ekranda hazır tasarımlar tek satırda kaydırılır: dikey alan
+   kesit görünümüne kalsın. */
+@media (max-width: 999px) {
+  .presets {
+    display: flex; gap: 4px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    margin: 10px 0 0; padding: 0 0 2px; scrollbar-width: none;
+  }
+  .presets::-webkit-scrollbar { display: none; }
+  .preset { flex: 0 0 auto; padding: 6px 11px; }
+  .preset span { display: none; }
+  .masthead { padding: 12px 0 8px; }
+  .masthead .sub { flex-basis: 100%; }
+}
+
+/* Dar ekranda uzun bileşik değerler (ör. zarf köşeleri) satıra sığmaz;
+   sarmalarına izin ver, kısa sayısal değerler yine tek satırda kalır. */
+@media (max-width: 620px) {
+  .row { flex-wrap: wrap; }
+  .row .v { white-space: normal; text-align: right; margin-left: auto; }
+}
+
+/* Dar ekranda kesit görünümü sabit kalırsa içeriğe 300 px kalıyor.
+   Orada kesit normal akışta kayar, sabit kalan yalnızca sekme çubuğudur;
+   geniş ekranda ise kesit solda sabit durmaya devam eder. */
+@media (max-width: 999px) {
+  .instrument { position: static; }
+  .tabs { top: 0; }
+}

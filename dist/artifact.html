@@ -414,6 +414,62 @@ button.act.ghost { background: transparent; color: var(--ink-2); border-color: v
   font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--ink-3);
 }
+
+/* --- Sekmeler: iş akışı aşamaları --- */
+.tabs {
+  display: flex; gap: 2px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  position: sticky; top: 0; z-index: 15;
+  background: var(--bg);
+  margin: 16px 0 0; padding: 0;
+  border-bottom: 1px solid var(--line);
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  flex: 0 0 auto; cursor: pointer; white-space: nowrap;
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
+  text-transform: uppercase; font-weight: 600;
+  padding: 10px 13px 9px; color: var(--ink-3);
+  background: none; border: none; border-bottom: 2px solid transparent;
+}
+.tab:hover { color: var(--ink-2); }
+.tab[aria-selected="true"] { color: var(--copper); border-bottom-color: var(--copper); }
+.tab:focus-visible { outline: 2px solid var(--copper); outline-offset: -2px; }
+
+section.off { display: none; }
+
+@media (min-width: 1000px) {
+  .tabs { margin: 0 0 4px; top: 0; }
+}
+
+/* Dar ekranda hazır tasarımlar tek satırda kaydırılır: dikey alan
+   kesit görünümüne kalsın. */
+@media (max-width: 999px) {
+  .presets {
+    display: flex; gap: 4px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    margin: 10px 0 0; padding: 0 0 2px; scrollbar-width: none;
+  }
+  .presets::-webkit-scrollbar { display: none; }
+  .preset { flex: 0 0 auto; padding: 6px 11px; }
+  .preset span { display: none; }
+  .masthead { padding: 12px 0 8px; }
+  .masthead .sub { flex-basis: 100%; }
+}
+
+/* Dar ekranda uzun bileşik değerler (ör. zarf köşeleri) satıra sığmaz;
+   sarmalarına izin ver, kısa sayısal değerler yine tek satırda kalır. */
+@media (max-width: 620px) {
+  .row { flex-wrap: wrap; }
+  .row .v { white-space: normal; text-align: right; margin-left: auto; }
+}
+
+/* Dar ekranda kesit görünümü sabit kalırsa içeriğe 300 px kalıyor.
+   Orada kesit normal akışta kayar, sabit kalan yalnızca sekme çubuğudur;
+   geniş ekranda ise kesit solda sabit durmaya devam eder. */
+@media (max-width: 999px) {
+  .instrument { position: static; }
+  .tabs { top: 0; }
+}
 </style>
 
 <main class="wrap" id="app"></main>
@@ -2726,6 +2782,7 @@ const save = () => {
  * Parametre tanımları
  * ------------------------------------------------------------------ */
 const G_STATOR = {
+  tab: "geo",
   name: "Stator laminasyonu",
   items: [
     ["Rext", "Dış yarıçap", 20, 160, 0.5, "mm"],
@@ -2735,6 +2792,7 @@ const G_STATOR = {
   ],
 };
 const G_SLOT = {
+  tab: "geo",
   name: "Stator oluğu (SlotW11)",
   items: [
     ["Zs", "Oluk sayısı", 3, 72, 3, ""],
@@ -2747,6 +2805,7 @@ const G_SLOT = {
   ],
 };
 const G_WIND = {
+  tab: "wind",
   name: "Sargı",
   items: [
     ["p", "Kutup çifti", 1, 24, 1, ""],
@@ -2761,7 +2820,7 @@ const G_WIND = {
 const GROUPS_SPM = [
   G_STATOR, G_SLOT, G_WIND,
   {
-    name: "Rotor ve mıknatıs",
+    name: "Rotor ve mıknatıs", tab: "geo",
     items: [
       ["gap", "Hava aralığı", 0.2, 5, 0.05, "mm"],
       ["Hmag", "Mıknatıs kalınlığı", 1, 15, 0.1, "mm"],
@@ -2770,7 +2829,7 @@ const GROUPS_SPM = [
     ],
   },
   {
-    name: "Çalışma noktası",
+    name: "Çalışma noktası", tab: "perf",
     items: [
       ["speed", "Devir", 100, 20000, 50, "d/dk"],
       ["Irms", "Faz akımı", 0.5, 400, 0.5, "A rms"],
@@ -2782,7 +2841,7 @@ const GROUPS_SPM = [
 const GROUPS_SCIM = [
   G_STATOR, G_SLOT, G_WIND,
   {
-    name: "Rotor kafesi",
+    name: "Rotor kafesi", tab: "geo",
     items: [
       ["Zr", "Rotor çubuk sayısı", 8, 96, 1, ""],
       ["gap", "Hava aralığı", 0.15, 5, 0.05, "mm"],
@@ -2798,7 +2857,7 @@ const GROUPS_SCIM = [
     ],
   },
   {
-    name: "Besleme",
+    name: "Besleme", tab: "perf",
     items: [
       ["Vline", "Hat gerilimi", 12, 690, 1, "V"],
       ["freq", "Frekans", 10, 1000, 5, "Hz"],
@@ -2806,7 +2865,7 @@ const GROUPS_SCIM = [
     ],
   },
   {
-    name: "Eşdeğer devre (faz başına)",
+    name: "Eşdeğer devre (faz başına)", tab: "perf",
     items: [
       ["Rs", "Stator direnci Rs", 0.05, 40, 0.01, "Ω"],
       ["Xls", "Stator kaçak Xls", 0.05, 60, 0.01, "Ω"],
@@ -2818,7 +2877,7 @@ const GROUPS_SCIM = [
     ],
   },
   {
-    name: "Isıl ve mekanik",
+    name: "Isıl ve mekanik", tab: "therm",
     items: [
       ["coolCoef", "Taşınım katsayısı", 5, 400, 5, "W/m²K"],
       ["coolFinFactor", "Gövde yüzey çarpanı", 1, 4, 0.1, ""],
@@ -2833,20 +2892,31 @@ const groupsFor = (d) => (d.type === "scim" ? GROUPS_SCIM : GROUPS_SPM);
 
 /* Üretim seçimleri: liste hâlinde seçilenler ve açık/kapalı anahtarlar */
 const CHOICES = [
-  { key: "lamGrade", label: "Silisli sac", opts: () => Object.keys(LAMINATIONS) },
-  { key: "cageMat", label: "Rotor kafesi", opts: () => Object.keys(CAGE_MATERIALS) },
-  { key: "insulClass", label: "Yalıtım sınıfı", opts: () => Object.keys(INSULATION) },
-  { key: "cutMethod", label: "Sac kesim yöntemi", opts: () => Object.keys(CUT_METHODS) },
-  { key: "impreg", label: "Emprenye", opts: () => Object.keys(IMPREG) },
-  { key: "RrMode", label: "Rotor direnci kaynağı",
+  { tab: "mat", key: "lamGrade", label: "Silisli sac", opts: () => Object.keys(LAMINATIONS) },
+  { tab: "mat", key: "cageMat", label: "Rotor kafesi", opts: () => Object.keys(CAGE_MATERIALS) },
+  { tab: "therm", key: "insulClass", label: "Yalıtım sınıfı", opts: () => Object.keys(INSULATION) },
+  { tab: "therm", key: "cutMethod", label: "Sac kesim yöntemi", opts: () => Object.keys(CUT_METHODS) },
+  { tab: "therm", key: "impreg", label: "Emprenye", opts: () => Object.keys(IMPREG) },
+  { tab: "perf", key: "RrMode", label: "Rotor direnci kaynağı",
     opts: () => ["manual", "geometri"],
     text: { manual: "Doküman değeri", geometri: "Geometriden hesapla" } },
 ];
 const TOGGLES = [
-  ["rotorClosed", "Kapalı rotor oluğu"],
-  ["skinEffect", "Derin çubuk (deri) etkisi"],
-  ["anneal", "Gerilim giderme tavı"],
-  ["hallRing", "Hall mıknatıs halkası (mil üzeri)"],
+  ["rotorClosed", "Kapalı rotor oluğu", "geo"],
+  ["skinEffect", "Derin çubuk (deri) etkisi", "perf"],
+  ["anneal", "Gerilim giderme tavı", "therm"],
+  ["hallRing", "Hall mıknatıs halkası (mil üzeri)", "therm"],
+];
+
+/* Sekmeler: profesyonel araçlardaki gibi iş akışı aşamasına göre.
+   Her sekme kendi GİRDİLERİNİ ve o girdilerin doğrudan SONUCUNU taşır. */
+const TABS = [
+  ["geo",   "Geometri"],
+  ["wind",  "Sargı"],
+  ["mat",   "Malzeme"],
+  ["perf",  "Performans"],
+  ["therm", "Isıl ve üretim"],
+  ["check", "Denetim"],
 ];
 
 /* ------------------------------------------------------------------ *
@@ -3185,24 +3255,30 @@ document.getElementById("app").innerHTML = `
 </div>
 
 <div class="stream">
-<section id="sec-plate" hidden><h2>Etiket karşılaştırması</h2><div class="card">
-  <div class="rows" id="plate"></div>
-  <p class="note">Sol sütun modelin hesabı, sağ sütun dokümandaki değer.</p>
+<nav class="tabs" id="tabs" role="tablist" aria-label="Tasarım aşaması"></nav>
+
+<!-- GEOMETRİ -->
+<section data-tab="geo"><h2>Geometri ayarları</h2><div class="card" id="ctrls-geo"></div></section>
+<section data-tab="geo" id="sec-slots" hidden><h2>Oluk kombinasyonu</h2><div class="card">
+  <div id="slotrules"></div>
+  <p class="note" id="slotsugg"></p>
+</div></section>
+<section data-tab="geo"><h2>Oluk / kutup matrisi</h2><div class="card">
+  <div class="scroller"><table class="matrix" id="matrix"></table></div>
+  <p class="note">Hücre değeri temel sargı faktörü kw₁. Dokununca o kombinasyona geçilir. Soluk hücreler dengeli üç fazlı sargı vermez.</p>
 </div></section>
 
-<section id="sec-accept" hidden><h2>Kabul testleri ve ısıl denetim</h2><div class="card">
-  <div class="rows" id="accept"></div>
-  <p class="note">Beklenen değerler; tedarikçinin test föyüyle karşılaştırmak içindir.
-  Sıcaklık artışı tek gövde yüzeyi üzerinden kaba bir dengedir, ısıl ağ çözümü değildir.</p>
+<!-- SARGI -->
+<section data-tab="wind"><h2>Sargı ayarları</h2><div class="card" id="ctrls-wind"></div></section>
+<section data-tab="wind"><h2>Sargı yerleşimi</h2><div class="card">
+  <div class="scroller"><div class="layout" id="layout"></div></div>
+  <p class="note" id="layout-note"></p>
 </div></section>
+<section data-tab="wind"><h2>Sargı faktörü harmonikleri</h2><div class="card"><div class="harm" id="harm"></div></div></section>
 
-<section id="sec-env" hidden><h2>Besleme zarfı ve üretim etkileri</h2><div class="card">
-  <div class="rows" id="env"></div>
-  <p class="note">MIL-STD-704 kalıcı hâl zarfı: 108–118 V, 393–407 Hz. Motor nominal
-  noktada değil, zarfın köşelerinde de nominal momenti vermek zorundadır.</p>
-</div></section>
-
-<section id="sec-mat" hidden><h2>Silisli sac</h2><div class="card">
+<!-- MALZEME -->
+<section data-tab="mat"><h2>Malzeme seçimi</h2><div class="card" id="ctrls-mat"></div></section>
+<section data-tab="mat" id="sec-mat" hidden><h2>Silisli sac</h2><div class="card">
   <div class="rows" id="matinfo"></div>
   <div class="matcharts">
     <figure><figcaption>Mıknatıslanma eğrisi · B (T) / H (A·m⁻¹)</figcaption><div id="bhchart"></div></figure>
@@ -3211,33 +3287,34 @@ document.getElementById("app").innerHTML = `
   <p class="note" id="matnote"></p>
 </div></section>
 
-<section id="sec-slots" hidden><h2>Oluk kombinasyonu</h2><div class="card">
-  <div id="slotrules"></div>
-  <p class="note" id="slotsugg"></p>
-</div></section>
-
-<section id="sec-curve" hidden><h2>Moment / devir</h2><div class="card">
+<!-- PERFORMANS -->
+<section data-tab="perf"><h2>Besleme ve çalışma noktası</h2><div class="card" id="ctrls-perf"></div></section>
+<section data-tab="perf"><h2>Sonuçlar</h2><div class="card"><div class="results" id="results"></div></div></section>
+<section data-tab="perf" id="sec-curve" hidden><h2>Moment / devir</h2><div class="card">
   <div id="curve"></div>
   <p class="note">Yatay eksen devir (d/dk), dikey eksen moment (N·m).</p>
 </div></section>
-
-<section><h2>Kontroller</h2><div class="card" id="ctrls"></div></section>
-<section><h2>Tasarım kontrolü</h2><div class="card" id="checks"></div></section>
-<section><h2>Sonuçlar</h2><div class="card"><div class="results" id="results"></div></div></section>
-
-<section><h2>Sargı yerleşimi</h2><div class="card">
-  <div class="scroller"><div class="layout" id="layout"></div></div>
-  <p class="note" id="layout-note"></p>
+<section data-tab="perf" id="sec-plate" hidden><h2>Etiket karşılaştırması</h2><div class="card">
+  <div class="rows" id="plate"></div>
+  <p class="note">Sol sütun modelin hesabı, sağ sütun dokümandaki değer.</p>
 </div></section>
 
-<section><h2>Sargı faktörü harmonikleri</h2><div class="card"><div class="harm" id="harm"></div></div></section>
-
-<section><h2>Oluk / kutup matrisi</h2><div class="card">
-  <div class="scroller"><table class="matrix" id="matrix"></table></div>
-  <p class="note">Hücre değeri temel sargı faktörü kw₁. Dokununca o kombinasyona geçilir. Soluk hücreler dengeli üç fazlı sargı vermez.</p>
+<!-- ISIL VE ÜRETİM -->
+<section data-tab="therm"><h2>Isıl, mekanik ve üretim ayarları</h2><div class="card" id="ctrls-therm"></div></section>
+<section data-tab="therm" id="sec-accept" hidden><h2>Kabul testleri ve ısıl denetim</h2><div class="card">
+  <div class="rows" id="accept"></div>
+  <p class="note">Beklenen değerler; tedarikçinin test föyüyle karşılaştırmak içindir.
+  Sıcaklık artışı tek gövde yüzeyi üzerinden kaba bir dengedir, ısıl ağ çözümü değildir.</p>
+</div></section>
+<section data-tab="therm" id="sec-env" hidden><h2>Besleme zarfı ve üretim etkileri</h2><div class="card">
+  <div class="rows" id="env"></div>
+  <p class="note">MIL-STD-704 kalıcı hâl zarfı: 108–118 V, 393–407 Hz. Motor nominal
+  noktada değil, zarfın köşelerinde de nominal momenti vermek zorundadır.</p>
 </div></section>
 
-<section><h2>Dışa aktar</h2><div class="card">
+<!-- DENETİM -->
+<section data-tab="check"><h2>Tasarım kontrolü</h2><div class="card" id="checks"></div></section>
+<section data-tab="check"><h2>Dışa aktar</h2><div class="card">
   <div class="actions">
     <button class="act" id="exp-pyl">Pyleecan JSON</button>
     <button class="act ghost" id="exp-design">Tasarım JSON</button>
@@ -3250,6 +3327,38 @@ document.getElementById("app").innerHTML = `
 <p class="note">Analitik model — hızlı ön tasarım içindir, sonlu elemanlar analizinin yerine geçmez.</p>
 </div>
 `;
+
+/* ------------------------------------------------------------------ *
+ * Sekmeler
+ *
+ * Profesyonel motor tasarım araçları (Motor-CAD, RMxprt) girdileri
+ * konu başlığına göre değil, İŞ AKIŞI aşamasına göre ayırır ve her
+ * aşamanın girdisiyle o girdinin doğrudan sonucunu yan yana tutar.
+ * Kesit görünümü ise aşamadan bağımsız, her zaman ekranda kalır.
+ * ------------------------------------------------------------------ */
+let tab = localStorage.getItem("motor.tab") || "geo";
+if (!TABS.some(([k]) => k === tab)) tab = "geo";
+
+const tabBar = document.getElementById("tabs");
+for (const [key, label] of TABS) {
+  const b = el("button", "tab", label);
+  b.dataset.tab = key;
+  b.setAttribute("role", "tab");
+  b.onclick = () => { tab = key; localStorage.setItem("motor.tab", key); applyTab(); };
+  tabBar.appendChild(b);
+}
+
+function applyTab() {
+  for (const b of tabBar.children)
+    b.setAttribute("aria-selected", String(b.dataset.tab === tab));
+  for (const sec of document.querySelectorAll("section[data-tab]"))
+    sec.classList.toggle("off", sec.dataset.tab !== tab);
+  // Etkin sekmeyi yalnızca ÇUBUĞUN içinde ortala; scrollIntoView sayfanın
+  // kendisini de yatay kaydırdığı için elle hesaplanır.
+  const cur = tabBar.querySelector('[aria-selected="true"]');
+  if (cur) tabBar.scrollLeft = cur.offsetLeft - (tabBar.clientWidth - cur.offsetWidth) / 2;
+  window.scrollTo({ top: 0, behavior: "instant" });
+}
 
 /* --- Hazır tasarımlar --- */
 let presetKey = "doc";
@@ -3284,8 +3393,11 @@ for (const b of document.querySelectorAll(".chip[data-view]"))
 /* --- Parametre denetimleri --- */
 let ctrlEls = {};
 function buildControls() {
-  const host = document.getElementById("ctrls");
-  host.replaceChildren();
+  const hosts = Object.fromEntries(
+    TABS.map(([k]) => [k, document.getElementById(`ctrls-${k}`)]).filter(([, h]) => h));
+  for (const h of Object.values(hosts)) h.replaceChildren();
+  const host = hosts.geo;             // sekmesi belirtilmemiş grupların yeri
+  const into = (t) => hosts[t] ?? host;
   ctrlEls = {};
   for (const grp of groupsFor(D)) {
     const gEl = el("div", "group");
@@ -3308,9 +3420,13 @@ function buildControls() {
       ctrlEls[key] = { num, input, unit, step };
     }
     gEl.appendChild(box);
-    host.appendChild(gEl);
+    into(grp.tab).appendChild(gEl);
   }
-  if (D.type !== "scim") return;
+  if (D.type !== "scim") {
+    for (const [k, h] of Object.entries(hosts))
+      if (!h.children.length) h.appendChild(el("p", "note", "Bu makine tipinde bu aşamada ayar yok."));
+    return;
+  }
 
   // --- Bağlantı biçimi ---
   const conn = el("div", "group");
@@ -3323,7 +3439,7 @@ function buildControls() {
     cbox.appendChild(b);
   }
   conn.appendChild(cbox);
-  host.appendChild(conn);
+  into("perf").appendChild(conn);
 
   // --- Üretim seçimleri ---
   for (const ch of CHOICES) {
@@ -3337,23 +3453,28 @@ function buildControls() {
       box.appendChild(b);
     }
     gEl.appendChild(box);
-    host.appendChild(gEl);
+    into(ch.tab).appendChild(gEl);
   }
 
-  const tEl = el("div", "group");
-  tEl.appendChild(el("span", "lbl", "Üretim seçenekleri"));
-  const tbox = el("div", "chips");
-  for (const [k, t] of TOGGLES) {
-    const b = el("button", "chip", t);
-    b.setAttribute("aria-pressed", String(!!D[k]));
-    b.onclick = () => { D[k] = !D[k]; save(); buildControls(); render(); };
-    tbox.appendChild(b);
+  // Anahtarlar ait oldukları aşamaya dağıtılır
+  for (const t of new Set(TOGGLES.map((x) => x[2]))) {
+    const list = TOGGLES.filter((x) => x[2] === t);
+    const tEl = el("div", "group");
+    tEl.appendChild(el("span", "lbl", "Seçenekler"));
+    const tbox = el("div", "chips");
+    for (const [k, label] of list) {
+      const b = el("button", "chip", label);
+      b.setAttribute("aria-pressed", String(!!D[k]));
+      b.onclick = () => { D[k] = !D[k]; save(); buildControls(); render(); };
+      tbox.appendChild(b);
+    }
+    tEl.appendChild(tbox);
+    into(t).appendChild(tEl);
   }
-  tEl.appendChild(tbox);
-  host.appendChild(tEl);
 
-  const note = el("p", "note", CAGE_MATERIALS[D.cageMat]?.note ?? "");
-  host.appendChild(note);
+  into("mat").appendChild(el("p", "note", CAGE_MATERIALS[D.cageMat]?.note ?? ""));
+  into("therm").appendChild(
+    el("p", "note", (CUT_METHODS[D.cutMethod]?.note ?? "") + " " + (IMPREG[D.impreg]?.note ?? "")));
 }
 const syncInputs = () => {
   for (const [k, c] of Object.entries(ctrlEls)) c.input.value = D[k];
@@ -3931,5 +4052,6 @@ function renderMatrix() {
 
 buildControls();
 render();
+applyTab();
 
 </script>

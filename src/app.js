@@ -519,6 +519,7 @@ document.getElementById("app").innerHTML = `
     <button class="act ghost" id="exp-design">Tasarım JSON</button>
     <button class="act ghost" id="reset">Varsayılana dön</button>
   </div>
+  <p class="note" id="exp-note" hidden></p>
   <p class="note">Pyleecan JSON doğrudan <code>pyleecan.Functions.load.load()</code> ile açılır.</p>
 </div></section>
 
@@ -634,13 +635,39 @@ const syncInputs = () => {
 };
 
 /* --- Dışa aktarma --- */
-const download = (name, obj) => {
-  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+/**
+ * Dosyayı kullanıcıya sunar.
+ *
+ * Yayınlanan sayfada tarayıcı indirmesi doğrudan çalışmaz; barındırıcı
+ * `window.claude.downloads.save()` üzerinden onay ister. Yerel açılışta
+ * (dist/index.html) bu arayüz yoktur, klasik bağlantıya düşülür.
+ */
+async function download(name, obj) {
+  const text = JSON.stringify(obj, null, 2);
+  const dl = window.claude?.downloads;
+  if (dl) {
+    try {
+      await dl.save({ filename: name, data: text });
+      note(`${name} kaydedildi.`);
+    } catch (e) {
+      if (e?.code === "declined") return;                 // kullanıcı vazgeçti
+      note(`Kaydedilemedi: ${e?.message ?? "bilinmeyen hata"}`);
+    }
+    return;
+  }
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
+  a.href = URL.createObjectURL(new Blob([text], { type: "application/json" }));
   a.download = name; a.click();
   URL.revokeObjectURL(a.href);
-};
+}
+
+/** Dışa aktarma sonucunu kısa bir satırla bildirir. */
+function note(msg) {
+  const el = document.getElementById("exp-note");
+  if (!el) return;
+  el.textContent = msg;
+  el.hidden = false;
+}
 document.getElementById("exp-pyl").onclick = () => download(`${D.name}.json`, toPyleecanAny(D));
 document.getElementById("exp-design").onclick = () => download(`${D.name}-design.json`, D);
 document.getElementById("reset").onclick = () => {

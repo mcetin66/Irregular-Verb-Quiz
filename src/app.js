@@ -1,7 +1,7 @@
 import {
   defaultDesign, defaultSPM, geometry, cageGeometry, winding,
   analyseAny, checksAny, toPyleecanAny, nameplate, PHASES,
-  MATERIALS, CAGE_MATERIALS, goodRotorSlots, optimisedDesign,
+  MATERIALS, CAGE_MATERIALS, goodRotorSlots, optimisedDesign, design115V,
   LAMINATIONS, Hof, specificLoss, lamOf,
 } from "./motor.js";
 import { buildParts, createViewer } from "./view3d.js";
@@ -441,6 +441,9 @@ document.getElementById("app").innerHTML = `
   <button class="preset" data-preset="doc">
     <b>Doküman</b><span>Elimizdeki motorun ölçüleri ve etiket değerleri</span>
   </button>
+  <button class="preset" data-preset="wye">
+    <b>115 V yıldız</b><span>Aynı motor, 115 V faz için yeniden sarılmış</span>
+  </button>
   <button class="preset" data-preset="opt">
     <b>Claude Op.</b><span>Aynı gövde ve görevde kısıtlı arama ile optimize edilmiş</span>
   </button>
@@ -528,7 +531,9 @@ let presetKey = "doc";
 for (const b of document.querySelectorAll(".preset[data-preset]"))
   b.addEventListener("click", () => {
     presetKey = b.dataset.preset;
-    D = presetKey === "opt" ? optimisedDesign() : defaultDesign();
+    D = presetKey === "opt" ? optimisedDesign()
+      : presetKey === "wye" ? design115V()
+      : defaultDesign();
     save(); buildControls(); render();
   });
 
@@ -769,7 +774,8 @@ function render() {
   const isSCIM = D.type === "scim";
 
   document.getElementById("sub").textContent = isSCIM
-    ? `sincap kafesli asenkron · ${D.Zs}/${D.Zr} oluk · ${2 * D.p} kutup · ${D.freq} Hz`
+    ? `sincap kafesli asenkron · ${D.Zs}/${D.Zr} oluk · ${2 * D.p} kutup · ${D.freq} Hz · ` +
+      `${D.connection === "delta" ? "üçgen" : "yıldız"} ${fx(D.connection === "delta" ? D.Vline : D.Vline / Math.sqrt(3), 0)} V`
     : `yüzey mıknatıslı senkron · ${D.Zs} oluk · ${w.poles} kutup`;
   for (const b of document.querySelectorAll(".chip[data-type]"))
     b.setAttribute("aria-pressed", String(b.dataset.type === D.type));

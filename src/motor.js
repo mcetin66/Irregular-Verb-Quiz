@@ -232,6 +232,52 @@ export function optimisedDesign() {
   };
 }
 
+/**
+ * Aynı motor, 115 V faz gerilimi için YENİDEN SARILMIŞ (yıldız bağlantı).
+ *
+ * Dokümandaki "115 V L-N / 200 V L-L" TEK bir üç fazlı şebekedir
+ * (115 × √3 = 199,2). Belirsizlik gerilimde değil, sargının o şebekeye nasıl
+ * bağlandığındadır:
+ *
+ *   ÜÇGEN  -> sargı hat gerilimini görür, faz 200 V
+ *   YILDIZ -> sargı faz gerilimini görür, faz 115 V
+ *
+ * Mevcut sargı (oluk başına 30 iletken = 240 sarım/faz) yalnızca ÜÇGEN'de
+ * çalışır; yıldıza alınırsa akı yarıya iner ve devrilme momenti nominal
+ * momentin altına düşer.
+ *
+ * 115 V faz gerilimiyle aynı akıyı elde etmek için sarım sayısı √3 kadar
+ * azaltılmalıdır: 240 / √3 = 138,6. Faz başına 16 bobin olduğundan paralel
+ * kol sayısı 16'nın böleni olmalı; gerçeklenebilir en yakın değer
+ * 17 sarım × 2 katman / 2 paralel kol = 136 sarımdır (%1,9 sapma).
+ * 140 sarım daha yakın olsa da kalkış momentini garanti alt sınırın altına
+ * düşürüyor; 136 hem kalkışı hem verimi koruyor.
+ *
+ * Sonuç aynı makinedir: aynı akı, aynı moment, aynı güç, aynı HAT akımı.
+ * Değişen yalnızca sargının nasıl bölündüğüdür.
+ */
+export function design115V() {
+  const d = defaultDesign();
+  return {
+    ...d,
+    name: "SCIM-48s38r-400Hz-115V",
+    connection: "wye",          // faz gerilimi = 200/√3 = 115,5 V
+    Ntcoil: 17, Nlayer: 2, Npcp: 2,   // Nph = 136 (üçgende 240)
+
+    // Dokümandaki Rs/Xls/Rr/Xlr 240 sarımlık ÜÇGEN sargıya aittir ve bu
+    // sargıya uygulanamaz; hepsi geometriden hesaplanır.
+    RsMode: "geometri", XMode: "geometri", RrMode: "geometri",
+
+    plate: {
+      ...d.plate,
+      // Dokümandaki akımlar üçgende FAZ akımlarıdır; yıldızda faz = hat
+      // olduğundan karşılaştırma hat akımı üzerinden yapılır (× √3).
+      I: 4.4 * Math.sqrt(3),
+      Ilr: 15.8 * Math.sqrt(3),
+    },
+  };
+}
+
 /** Kalıcı mıknatıslı örnek tasarım (12 oluk / 10 kutup). */
 export function defaultSPM() {
   return {
@@ -683,7 +729,8 @@ export function statorResistance(d, w, g) {
   const Lend = 1.15 * d.coil_pitch * g.tau_s;                  // bobin başı [mm]
   const Lturn = 2 * (d.L1 + Lend) * mm;
   const rho = MATERIALS.copper.rho20 * (1 + MATERIALS.copper.alpha * (d.Twind - 20));
-  const Rs = (rho * w.Nph * Lturn) / Math.max(1e-12, Acu * mm * mm);
+  // Nph zaten seri sarım sayısıdır; paralel kollar direnci ayrıca böler.
+  const Rs = (rho * w.Nph * Lturn) / Math.max(1e-12, Acu * mm * mm * d.Npcp);
   return { Rs, Acu, Lend, Lturn };
 }
 

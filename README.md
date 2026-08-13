@@ -159,11 +159,46 @@ model derin çubuk etkisiyle 5,26 N·m buluyor:
 | Kilitli rotor akımı | 15,80 A | 15,06 |
 | Net oluk alanı | 17,155 mm² | 17,10 |
 
-## İki hazır tasarım
+## 115 V mi, 200 V mü?
 
-Arayüzün üstündeki iki düğme aynı gövdede iki tasarımı karşılaştırır.
+Dokümandaki "115 V L-N / 200 V L-L" **iki seçenek değil, tek bir üç fazlı
+şebekedir** (115 × √3 = 199,2). Bu, standart havacılık 400 Hz beslemesidir.
+Belirsizlik gerilimde değil, **sargının o şebekeye nasıl bağlandığındadır**:
 
-**Doküman** — elimizdeki motorun ölçüleri ve etiket değerleri (yukarıdaki tablo).
+| Bağlantı | Sargının gördüğü gerilim |
+|---|---|
+| Üçgen | hat gerilimi — **200 V** |
+| Yıldız | faz gerilimi — **115 V** |
+
+Mevcut sargı (oluk başına 30 iletken = 240 sarım/faz) **yalnızca üçgende
+çalışır**. Yıldıza alınırsa akı √3 kadar düşer ve devrilme momenti nominal
+momentin altına iner — motor yükü kaldıramaz.
+
+115 V faz gerilimiyle aynı motoru elde etmek için sargı yeniden sarılmalıdır:
+sarım sayısı √3 kadar azalır (240 → 138,6; gerçeklenebilir en yakın 136).
+Sonuç **aynı makinedir** — aynı akı, aynı moment, aynı güç, aynı HAT akımı:
+
+| Aynı yükte (2,6 N·m) | Üçgen 200 V | Yıldız 115 V |
+|---|---|---|
+| Faz gerilimi | 200,0 V | 115,5 V |
+| Faz başına sarım | 240 | 136 |
+| Oluk başına iletken | 30 | 34 (2 paralel kol) |
+| Hava aralığı akısı | 0,443 T | 0,453 T |
+| **Hat akımı** | **7,69 A** | **7,79 A** |
+| Verim | %77,3 | %77,5 |
+| Çıkış gücü | 1463 W | 1505 W |
+
+Dokümandaki 4,4 A ve 15,8 A üçgende **faz** akımlarıdır; hat akımları
+bunların √3 katıdır (7,62 A ve 27,4 A).
+
+## Üç hazır tasarım
+
+Arayüzün üstündeki düğmeler aynı gövdede üç tasarımı karşılaştırır.
+
+**Doküman** — elimizdeki motorun ölçüleri ve etiket değerleri (yukarıdaki tablo),
+üçgen bağlı, faz gerilimi 200 V.
+
+**115 V yıldız** — aynı motor, 115 V faz gerilimi için yeniden sarılmış.
 
 **Claude Op.** — aynı gövde (Ø91 × 58 mm), aynı besleme (200 V üçgen, 400 Hz,
 8 kutup) ve aynı görev (1,5 kW / 2,6 N·m) altında kısıtlı arama ile bulunan

@@ -5,7 +5,7 @@ import {
   analyseSCIM, checksSCIM, cageGeometry, nameplate, toPyleecanSCIM,
   MATERIALS, CAGE_MATERIALS, cageResistance, skinFactors, stack,
   slotRules, goodRotorSlots, ironLoss, optimisedDesign, statorResistance,
-  LAMINATIONS, Hof, specificLoss, saturationFactor,
+  LAMINATIONS, Hof, specificLoss, saturationFactor, design115V, phaseVoltage,
 } from "../src/motor.js";
 
 const near = (a, b, tol, what) =>
@@ -438,4 +438,75 @@ test("doluluk tavanı sargı tipine göre denetlenir", () => {
   const round = { ...o, windType: "yuvarlak" };
   assert.ok(checksSCIM(round, analyseSCIM(round)).some(
     (c) => c.level === "crit" && c.label === "Oluk doluluğu"));
+});
+
+/* ================================================================== *
+ * 115 V / 200 V belirsizliği
+ * ================================================================== */
+
+test("115 V ve 200 V aynı şebekedir", () => {
+  const d = defaultDesign();
+  // 115 V L-N ile 200 V L-L tek bir üç fazlı sistemdir
+  near(115 * Math.sqrt(3), 199.2, 0.5, "115 × √3");
+  near(phaseVoltage({ ...d, connection: "delta" }), 200, 1e-9, "üçgende faz gerilimi");
+  near(phaseVoltage({ ...d, connection: "wye" }), 200 / Math.sqrt(3), 1e-9, "yıldızda faz gerilimi");
+});
+
+test("mevcut sargı yıldıza alınamaz — akı yarıya iner", () => {
+  const d = defaultDesign();
+  const delta = analyseSCIM(d);
+  const wye = analyseSCIM({ ...d, connection: "wye" });
+
+  near(wye.Bg / delta.Bg, 1 / Math.sqrt(3), 0.02, "akı oranı");
+  assert.ok(wye.peakT < d.plate.T,
+    `yıldızda devrilme momenti ${wye.peakT.toFixed(2)} < nominal ${d.plate.T}`);
+});
+
+test("115 V yeniden sarım aynı makineyi verir", () => {
+  // Aynı YÜKTE karşılaştır: 2,6 N·m veren devri her iki tasarım için çöz.
+  const atT = (d, Tt = 2.6) => {
+    let lo = 1, hi = (60 * d.freq) / d.p - 1;
+    for (let i = 0; i < 40; i++) {
+      const m = (lo + hi) / 2;
+      analyseSCIM({ ...d, speed: m }).T > Tt ? (lo = m) : (hi = m);
+    }
+    return analyseSCIM({ ...d, speed: (lo + hi) / 2 });
+  };
+  const a = atT(defaultDesign());       // üçgen 200 V, 240 sarım
+  const b = atT(design115V());          // yıldız 115 V, 136 sarım
+
+  // sarım sayısı gerilim oranı kadar azalmalı
+  near(b.wind.Nph / a.wind.Nph, 1 / Math.sqrt(3), 0.03, "sarım oranı");
+  // manyetik tasarım aynı kalmalı
+  assert.ok(Math.abs(b.Bg / a.Bg - 1) < 0.04, `akı ${a.Bg.toFixed(3)} -> ${b.Bg.toFixed(3)}`);
+  assert.ok(Math.abs(b.Bt / a.Bt - 1) < 0.04, "diş akı yoğunluğu korunur");
+  // HAT akımı aynı: üçgende hat = √3 × faz, yıldızda hat = faz
+  const lineA = a.I1 * Math.sqrt(3), lineB = b.I1;
+  assert.ok(Math.abs(lineB / lineA - 1) < 0.08,
+    `hat akımı ${lineA.toFixed(2)} -> ${lineB.toFixed(2)} A`);
+  // verim ve güç pratikte aynı
+  assert.ok(Math.abs(b.eta - a.eta) < 0.015, `verim ${a.eta} -> ${b.eta}`);
+  assert.ok(Math.abs(b.Pout / a.Pout - 1) < 0.06, "çıkış gücü korunur");
+});
+
+test("115 V tasarımı 1,5 kW görevini karşılar", () => {
+  const d = design115V(), r = analyseSCIM(d);
+  assert.equal(d.connection, "wye");
+  near(r.V, 200 / Math.sqrt(3), 0.1, "faz gerilimi 115,5 V");
+  assert.ok(r.Pout >= 1450, `çıkış gücü ${r.Pout.toFixed(0)} W`);
+  assert.ok(r.T >= 2.55, `moment ${r.T.toFixed(2)} N·m`);
+  assert.ok(r.Tstart >= d.plate.Tstart, `kalkış momenti ${r.Tstart.toFixed(2)} N·m`);
+  assert.ok(r.peakT > 1.7 * r.T, "devrilme payı yeterli");
+  // paralel kol sayısı faz başına bobin sayısını bölmeli (48/3 = 16)
+  assert.equal(16 % d.Npcp, 0, "paralel kol sayısı gerçeklenebilir olmalı");
+});
+
+test("paralel kollar stator direncini böler", () => {
+  const d = defaultDesign();
+  const g = geometry(d), w1 = winding(d);
+  const r1 = statorResistance({ ...d, RsMode: "geometri" }, w1, g);
+  // aynı toplam sarım, 2 paralel kol: Nph yarıya iner, direnç dörtte bire
+  const d2 = { ...d, Npcp: 2 };
+  const r2 = statorResistance(d2, winding(d2), g);
+  near(r2.Rs / r1.Rs, 0.25, 0.01, "Rs ∝ Nph² / Npcp");
 });

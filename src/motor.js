@@ -156,6 +156,13 @@ export function defaultDesign() {
     Xm: 0,     // 0 ise geometriden hesaplanır
     Pfw: 60,   // sürtünme + rüzgâr kaybı [W]
 
+    // --- Isıl ve mekanik sınıflar ---
+    insulClass: "H",       // yalıtım sınıfı (teklifte H sınıfı)
+    ambient: 40,           // ortam sıcaklığı [°C]
+    coolCoef: 60,          // gövde ısı taşınım katsayısı [W/m²K]
+    coolFinFactor: 1.8,    // kanat/gövde ile artan yüzey çarpanı
+    balanceGrade: 2.5,     // ISO 21940 kalite sınıfı (teklifte G2.5)
+
     // --- Üretim seçimleri ---
     Ksfill: 0.417,               // oluk bakır doluluk oranı
     windType: "yuvarlak",        // "yuvarlak" | "dikdörtgen"
@@ -275,6 +282,29 @@ export function design115V() {
       I: 4.4 * Math.sqrt(3),
       Ilr: 15.8 * Math.sqrt(3),
     },
+  };
+}
+
+/**
+ * Tedarikçi teklifindeki prototip özelliği.
+ *
+ * Teklif, ölçtüğümüz motorla aynı gövde ve sargıyı tanımlıyor ama iki
+ * malzemeyi değiştiriyor:
+ *   sac    M400-50A (yanan motorda) -> M235-35A  (lazer kesim)
+ *   kafes  alüminyum döküm          -> bakır çubuk + lehimli halka
+ * Ayrıca H sınıfı yalıtım ve ISO 21940 G2.5 balans şart koşuluyor.
+ *
+ * Teklifin doğruladıkları: 48 oluk, çift katman dağıtılmış sargı,
+ * Ø0,55 mm tel, 0,30 mm hava aralığı — hepsi modelle örtüşüyor.
+ */
+export function quotedDesign() {
+  return {
+    ...defaultDesign(),
+    name: "SCIM-prototip-teklif",
+    lamGrade: "M235-35A",
+    cageMat: "Bakır çubuk",
+    RrMode: "geometri",     // doküman Rr'si alüminyum kafese aitti
+    insulClass: "H",
   };
 }
 
@@ -655,6 +685,113 @@ export function ironLoss(d, B_tooth, B_yoke, m_tooth, m_yoke) {
 }
 
 /**
+ * Yalıtım sınıfları — IEC 60034-1.
+ * limit: sargı sıcak nokta sınırı [°C]
+ * rise : direnç yöntemiyle izin verilen sıcaklık artışı [K] (40 °C ortamda)
+ */
+export const INSULATION = {
+  B: { limit: 130, rise: 80 },
+  F: { limit: 155, rise: 105 },
+  H: { limit: 180, rise: 125 },
+};
+
+/**
+ * Isıl değerlendirme. Gövde yüzeyinden atılması gereken ısı ve bunun için
+ * gereken taşınım katsayısı hesaplanır; yalıtım sınıfının izin verdiği
+ * sıcaklık artışıyla karşılaştırılır.
+ *
+ * Bu bir ısıl AĞ çözümü değildir — tek gövde yüzeyi üzerinden kaba bir
+ * denge kurar. Amacı soğutmanın hangi mertebede olması gerektiğini
+ * göstermektir.
+ */
+export function thermal(d, Ploss) {
+  const mm = 1e-3;
+  const R = d.Rext * mm, L = d.L1 * mm;
+  const areaBare = 2 * Math.PI * R * L + 2 * Math.PI * R * R;   // silindir + iki uç
+  const area = areaBare * (d.coolFinFactor ?? 1);
+  const cls = INSULATION[d.insulClass] ?? INSULATION.F;
+
+  const fluxDens = Ploss / Math.max(1e-9, area);                // W/m²
+  const riseAt = (h) => Ploss / Math.max(1e-9, h * area);       // K
+  const rise = riseAt(d.coolCoef ?? 25);
+  const hNeeded = Ploss / Math.max(1e-9, area * cls.rise);      // gereken h
+
+  return {
+    area, areaBare, fluxDens, rise, hNeeded, cls,
+    hot: (d.ambient ?? 40) + rise,
+    ok: rise <= cls.rise,
+    // karşılaştırma için tipik taşınım katsayıları
+    scale: [
+      ["doğal konveksiyon", 10],
+      ["kendi fanı (TEFC)", 25],
+      ["cebri hava (üflemeli)", 60],
+      ["yoğun cebri hava", 120],
+      ["sıvı soğutma", 500],
+    ],
+  };
+}
+
+/**
+ * ISO 21940-11 balans değerlendirmesi.
+ * G sınıfı: e_izin × Ω = G  (G [mm/s], e [mm], Ω [rad/s])
+ */
+export function balance(d, mRotor, rpm) {
+  const omega = (TAU * rpm) / 60;
+  const e_mm = (d.balanceGrade ?? 2.5) / Math.max(1e-9, omega);  // izin verilen eksantriklik [mm]
+  const U = e_mm * 1000 * mRotor;                               // artık balanssızlık [g·mm]
+  const force = mRotor * e_mm * mm2m(1) * omega * omega;         // dönen kuvvet [N]
+  return {
+    grade: d.balanceGrade ?? 2.5,
+    e_um: e_mm * 1000,
+    U_gmm: U,
+    U_perPlane: U / 2,
+    force,
+    gapRatio: (e_mm / Math.max(1e-9, d.gap)) * 100,              // hava aralığının yüzdesi
+  };
+}
+const mm2m = (x) => x * 1e-3;
+
+/**
+ * Kabul testleri için beklenen değerler — tedarikçinin test föyüyle
+ * karşılaştırmak için. Test adımları teklifteki sıraya uyar.
+ */
+export function acceptanceTests(d, r) {
+  const M = MATERIALS.copper;
+  const wye = d.connection !== "delta";
+
+  // Soğuk (20 °C) faz direnci ve terminaller arası ölçüm değeri
+  const Rph20 = r.Rs0 / (1 + M.alpha * (d.Twind - 20));
+  const Rterm = wye ? 2 * Rph20 : (2 / 3) * Rph20;
+
+  // Yüksüz nokta: mekanik güç yalnızca sürtünme + rüzgârı karşılar
+  let lo = 1e-5, hi = 0.2;
+  for (let i = 0; i < 40; i++) {
+    const m = (lo + hi) / 2;
+    const n = r.ns * (1 - m);
+    (analyseSCIM({ ...d, speed: n }).Pmech > d.Pfw) ? (hi = m) : (lo = m);
+  }
+  const noLoad = analyseSCIM({ ...d, speed: r.ns * (1 - (lo + hi) / 2) });
+
+  // HiPot — IEC 60034-1: 2·Un + 1000 V, en az 1500 V, 1 dakika
+  const Un = d.Vline;
+  const hipot = Math.max(1500, 2 * Un + 1000);
+
+  // Nominal nokta: yükün istediği momenti veren devir
+  const Trated = d.plate?.T ?? r.T;
+  let a = 1, b = r.ns - 1;
+  for (let i = 0; i < 40; i++) {
+    const m = (a + b) / 2;
+    analyseSCIM({ ...d, speed: m }).T > Trated ? (a = m) : (b = m);
+  }
+  const rated = analyseSCIM({ ...d, speed: (a + b) / 2 });
+
+  const th = thermal(d, rated.Ploss);
+  const bal = balance(d, r.mass.rotating, rated.ns * (1 - rated.s));
+
+  return { Rph20, Rterm, noLoad, rated, hipot, th, bal, wye, Trated };
+}
+
+/**
  * Doyma faktörü — B–H eğrisinden manyeto-motor kuvvet dengesiyle.
  *
  * Bir kutup çifti boyunca akı yolu: 2 hava aralığı, 2 stator dişi,
@@ -987,20 +1124,27 @@ export function analyseSCIM(d) {
   const Jbar = Ibar / c.A_bar;                    // A/mm²
 
   // --- Kütleler ---
+  const lam = lamOf(d);
   const vol = (ro, ri) => Math.PI * (ro ** 2 - ri ** 2) * d.L1 * mm ** 3;
   const V_yoke = vol(d.Rext, g.r3) * d.Kf1;
   const V_teeth = d.Zs * d.W3 * (d.H1 + d.H2) * d.L1 * mm ** 3 * d.Kf1;
   const V_rot = (vol(c.Rr, c.Rsh) - d.Zr * c.A_bar * d.L1 * mm ** 3) * d.Kf1;
   const V_cu = 3 * w.Nph * d.Npcp * statR.Lturn * A_wire;
+  const V_shaft = Math.PI * (c.Rsh * mm) ** 2 * ((d.L1 + 2 * Math.max(12, 0.35 * d.L1)) * mm);
+  const mCage = d.Zr * c.A_bar * mm * mm * (d.L1 * mm) * cageOf(d).dens;
   const mass = {
-    steel: (V_yoke + V_teeth + V_rot) * M.steel.rho,
+    statorSteel: (V_yoke + V_teeth) * lam.rho,
+    rotorSteel: V_rot * lam.rho,
     copper: V_cu * M.copper.rho,
-    cage: d.Zr * c.A_bar * mm * mm * (d.L1 * mm) * cageOf(d).dens,
+    cage: mCage,
+    shaft: V_shaft * M.shaft.rho,
   };
-  mass.total = mass.steel + mass.copper + mass.cage;
+  mass.steel = mass.statorSteel + mass.rotorSteel;
+  // Balans, dönen kütlelerin tamamı üzerinden yapılır
+  mass.rotating = mass.rotorSteel + mass.cage + mass.shaft;
+  mass.total = mass.steel + mass.copper + mass.cage + mass.shaft;
 
   // --- Demir kaybı: sac kalitesinin ÖLÇÜLEN kayıp yüzeyinden ---
-  const lam = lamOf(d);
   const iron = ironLoss(d, Bt, By, V_teeth * lam.rho, V_yoke * lam.rho);
   const Pfe = iron.total;
   const pack = stack(d);

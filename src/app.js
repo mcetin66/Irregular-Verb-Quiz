@@ -1,7 +1,8 @@
 import {
   defaultDesign, defaultSPM, geometry, cageGeometry, winding,
   analyseAny, checksAny, toPyleecanAny, nameplate, PHASES,
-  MATERIALS, CAGE_MATERIALS, goodRotorSlots, optimisedDesign, design115V,
+  MATERIALS, CAGE_MATERIALS, goodRotorSlots, optimisedDesign, design115V, quotedDesign,
+  acceptanceTests, INSULATION,
   LAMINATIONS, Hof, specificLoss, lamOf,
 } from "./motor.js";
 import { buildParts, createViewer } from "./view3d.js";
@@ -124,6 +125,15 @@ const GROUPS_SCIM = [
       ["Twind", "Sargı sıcaklığı", 20, 180, 5, "°C"],
     ],
   },
+  {
+    name: "Isıl ve mekanik",
+    items: [
+      ["coolCoef", "Taşınım katsayısı", 5, 400, 5, "W/m²K"],
+      ["coolFinFactor", "Gövde yüzey çarpanı", 1, 4, 0.1, ""],
+      ["ambient", "Ortam sıcaklığı", -40, 80, 5, "°C"],
+      ["balanceGrade", "Balans sınıfı G", 0.4, 16, 0.1, "mm/s"],
+    ],
+  },
 ];
 const groupsFor = (d) => (d.type === "scim" ? GROUPS_SCIM : GROUPS_SPM);
 
@@ -131,6 +141,7 @@ const groupsFor = (d) => (d.type === "scim" ? GROUPS_SCIM : GROUPS_SPM);
 const CHOICES = [
   { key: "lamGrade", label: "Silisli sac", opts: () => Object.keys(LAMINATIONS) },
   { key: "cageMat", label: "Rotor kafesi", opts: () => Object.keys(CAGE_MATERIALS) },
+  { key: "insulClass", label: "Yalıtım sınıfı", opts: () => Object.keys(INSULATION) },
   { key: "RrMode", label: "Rotor direnci kaynağı",
     opts: () => ["manual", "geometri"],
     text: { manual: "Doküman değeri", geometri: "Geometriden hesapla" } },
@@ -441,6 +452,9 @@ document.getElementById("app").innerHTML = `
   <button class="preset" data-preset="doc">
     <b>Doküman</b><span>Elimizdeki motorun ölçüleri ve etiket değerleri</span>
   </button>
+  <button class="preset" data-preset="quote">
+    <b>Teklif</b><span>Tedarikçinin prototip özelliği: M235-35A + bakır çubuk</span>
+  </button>
   <button class="preset" data-preset="wye">
     <b>115 V yıldız</b><span>Aynı motor, 115 V faz için yeniden sarılmış</span>
   </button>
@@ -476,6 +490,12 @@ document.getElementById("app").innerHTML = `
 <section id="sec-plate" hidden><h2>Etiket karşılaştırması</h2><div class="card">
   <div class="rows" id="plate"></div>
   <p class="note">Sol sütun modelin hesabı, sağ sütun dokümandaki değer.</p>
+</div></section>
+
+<section id="sec-accept" hidden><h2>Kabul testleri ve ısıl denetim</h2><div class="card">
+  <div class="rows" id="accept"></div>
+  <p class="note">Beklenen değerler; tedarikçinin test föyüyle karşılaştırmak içindir.
+  Sıcaklık artışı tek gövde yüzeyi üzerinden kaba bir dengedir, ısıl ağ çözümü değildir.</p>
 </div></section>
 
 <section id="sec-mat" hidden><h2>Silisli sac</h2><div class="card">
@@ -534,6 +554,7 @@ for (const b of document.querySelectorAll(".preset[data-preset]"))
     presetKey = b.dataset.preset;
     D = presetKey === "opt" ? optimisedDesign()
       : presetKey === "wye" ? design115V()
+      : presetKey === "quote" ? quotedDesign()
       : defaultDesign();
     save(); buildControls(); render();
   });
@@ -876,6 +897,54 @@ function render() {
       v.innerHTML = `${c.txt} <span>${c.u}</span> <b data-l="${lvl}">${
         (c.dev * 100 >= 0 ? "+" : "")}${(c.dev * 100).toFixed(1)}%</b>`;
       e.appendChild(v);
+      return e;
+    }));
+  }
+
+  // --- Kabul testleri ve ısıl denetim ---
+  const accSec = document.getElementById("sec-accept");
+  accSec.hidden = !isSCIM;
+  if (isSCIM) {
+    const t = acceptanceTests(D, r);
+    const nl = t.noLoad, rt = t.rated;
+    const sev = (ok) => (ok ? "ok" : "crit");
+    const rows = [
+      ["— Stator testleri (adım 5)", "", "", null],
+      ["DC faz direnci @20 °C", fx(t.Rph20, 3), "Ω", null],
+      [`Terminaller arası (${t.wye ? "yıldız 2R" : "üçgen 2R/3"})`, fx(t.Rterm, 3), "Ω", null],
+      ["HiPot — IEC 60034-1, 1 dk", fx(t.hipot, 0), "V", null],
+      ["Yalıtım sınıfı", `${D.insulClass} · ${INSULATION[D.insulClass].limit} °C`, "", null],
+
+      ["— Motor testleri (adım 11)", "", "", null],
+      ["Yüksüz akım", fx(nl.I1, 2), "A", null],
+      ["Yüksüz güç faktörü", fx(nl.pf, 3), "", null],
+      ["Yüksüz giriş gücü", fx(nl.Pin, 0), "W", null],
+      ["Kilitli rotor akımı", fx(r.Ilr, 2), "A", null],
+      ["Kilitli rotor momenti", fx(r.Tstart, 2), "N·m", null],
+      [`Nominal nokta (${fx(t.Trated, 2)} N·m)`, `${fx(rt.I1, 2)} A · ${fx(rt.ns * (1 - rt.s), 0)} d/dk`, "", null],
+      ["Nominal verim", fx(rt.eta * 100, 1), "%", null],
+
+      ["— Sıcaklık artışı", "", "", null],
+      ["Gövde ısı akısı", fx(t.th.fluxDens, 0), "W/m²", null],
+      [`İzin verilen artış (${D.insulClass})`, fx(t.th.cls.rise, 0), "K", null],
+      ["Gereken taşınım katsayısı", fx(t.th.hNeeded, 0), "W/m²K", null],
+      [`Seçilen h = ${fx(D.coolCoef, 0)} ile artış`, fx(t.th.rise, 0), "K", sev(t.th.ok)],
+      ["Tahmini sargı sıcaklığı", fx(t.th.hot, 0), "°C", sev(t.th.hot <= t.th.cls.limit)],
+
+      ["— Balans (adım 9)", "", "", null],
+      [`ISO 21940 G${t.bal.grade}`, fx(t.bal.e_um, 2), "µm", null],
+      ["Dönen kütle", fx(r.mass.rotating, 3), "kg", null],
+      ["Artık balanssızlık / düzlem", fx(t.bal.U_perPlane, 2), "g·mm", null],
+      ["Hava aralığına oranı", fx(t.bal.gapRatio, 1), "%", sev(t.bal.gapRatio < 10)],
+    ];
+    document.getElementById("accept").replaceChildren(...rows.map(([n, v, u, lvl]) => {
+      if (!v) { const h = el("div", "row grouphead"); h.appendChild(el("div", "n", n)); return h; }
+      const e = el("div", "row");
+      e.appendChild(el("div", "n", n));
+      const val = el("div", "v");
+      val.innerHTML = `${v}${u ? ` <span>${u}</span>` : ""}` +
+        (lvl ? ` <b data-l="${lvl}">${lvl === "ok" ? "uygun" : "sınır aşıldı"}</b>` : "");
+      e.appendChild(val);
       return e;
     }));
   }

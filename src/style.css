@@ -404,3 +404,10 @@ button.act.ghost { background: transparent; color: var(--ink-2); border-color: v
 }
 .chart .axlbl { fill: var(--ink-3); opacity: 0.8; }
 .chart .markline { stroke: var(--ink-3); stroke-width: 0.6; stroke-dasharray: 2 2; opacity: 0.6; }
+
+/* Kabul testi tablosunda grup başlıkları */
+.row.grouphead { border-bottom: none; padding-top: 12px; padding-bottom: 2px; }
+.row.grouphead .n {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-3);
+}
